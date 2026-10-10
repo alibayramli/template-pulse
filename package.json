@@ -1,0 +1,35 @@
+{
+  "name": "backstage-template-pulse",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "packageManager": "yarn@4.4.1",
+  "engines": {
+    "node": "22 || 24"
+  },
+  "resolutions": {
+    "got": "11.8.6"
+  },
+  "workspaces": [
+    "plugins/*"
+  ],
+  "scripts": {
+    "tsc": "tsc",
+    "build": "yarn tsc && backstage-cli repo build --all",
+    "test": "backstage-cli repo test --watch=false --maxWorkers=2",
+    "lint": "backstage-cli repo lint"
+  },
+  "devDependencies": {
+    "@backstage/cli": "0.36.6",
+    "@backstage/cli-defaults": "0.1.6",
+    "@jest/environment-jsdom-abstract": "~30.2.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.15.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "jest": "~30.2.0",
+    "jsdom": "^27.1.0",
+    "typescript": "~5.8.3"
+  },
+  "description": "Track the health and adoption of your Backstage templates with execution analytics, performance insights, and searchable run history."
+}
