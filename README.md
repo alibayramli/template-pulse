@@ -1,74 +1,78 @@
 # Template Pulse
 
+**[Try the live demo](https://alibayramli.github.io/template-pulse-demo/)** · [Run the demo locally](https://github.com/alibayramli/template-pulse-demo#run-the-showcase)
+
 ![Template Pulse](plugins/template-pulse/assets/template-pulse-wordmark.svg)
 
-See which Backstage templates people use, how often runs succeed, and how long they take. Find a problem, filter its runs, and open the original task to investigate.
+See which Backstage templates people use, how often runs succeed, and how long they take. Filter execution history and open the original Scaffolder task to investigate.
 
 - Template health, user activity, and daily execution counts.
-- Date, template and user filters for analytics; search and status filters for executions.
-- Shareable links that keep the selected filters and view.
-- Personal analytics for developers; organization analytics for authorized users.
+- Date, template, and user filters, plus execution search and status filters.
+- Personal and organization views with permission checks and shareable links.
 
 ## Add to Backstage
 
-The packages are not published yet. Copy the five folders in `plugins/` into your Backstage workspace. Add `@template-pulse/plugin` to the app package dependencies and `@template-pulse/plugin-backend` plus `@template-pulse/plugin-scaffolder-backend-module-template-pulse` to the backend package dependencies using `workspace:^`, then run `yarn install`.
+Requires Node.js 22 or 24, Yarn 4, React 18, and Backstage's new frontend and backend systems. Tested with Backstage 1.55.
 
-Register the frontend plugin:
+Packages are not published yet. Copy all five folders in `plugins/` into your Backstage workspace, then add the dependencies (adjust workspace names if needed):
+
+```sh
+yarn workspace app add @template-pulse/plugin@workspace:^
+yarn workspace backend add @template-pulse/plugin-backend@workspace:^ @template-pulse/plugin-scaffolder-backend-module-template-pulse@workspace:^ @template-pulse/plugin-common@workspace:^
+```
+
+Add the frontend plugin to your app's existing features and import the Backstage UI stylesheet once:
 
 ```tsx
-import templatePulse from "@template-pulse/plugin";
+import '@backstage/ui/css/styles.css';
+import templatePulse from '@template-pulse/plugin';
 
 createApp({ features: [/* existing features, */ templatePulse] });
 ```
 
-Register the backend plugin:
+Register the backend plugin and history module alongside your existing Scaffolder backend:
 
 ```ts
-backend.add(import("@template-pulse/plugin-backend"));
-// Install alongside Scaffolder when using database history:
+backend.add(import('@template-pulse/plugin-backend'));
 backend.add(
-  import("@template-pulse/plugin-scaffolder-backend-module-template-pulse")
+  import('@template-pulse/plugin-scaffolder-backend-module-template-pulse'),
 );
 ```
 
-Import `@backstage/ui/css/styles.css` once in your app entry point. Add this configuration:
+Configure `app-config.yaml`:
 
 ```yaml
 permission:
   enabled: true
 templatePulse:
   historySource: database
-  maxTasks: 200
-app:
-  routes:
-    bindings:
-      template-pulse.task: scaffolder.ongoingTask
 ```
 
-Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` for personal analytics and `template-pulse.read-all` for organization analytics. An allow-all policy grants both. Existing task permissions still apply, including when a link is shared.
+Merge the [permission example](examples/permission-policy.ts) into your existing policy. Grant `template-pulse.read` for personal analytics and reserve `template-pulse.read-all` for users allowed to view organization analytics. Scaffolder task permissions still apply.
 
-Open **/template-pulse**. Template and user links open their Catalog pages; task links open the Scaffolder run.
+Open **/template-pulse**. Task links open Scaffolder runs; template and user links open Catalog entities.
 
-## Understand the numbers
+## How analytics work
 
-Date, template and user filters affect every total, chart and table. Only templates and users with runs in that selection appear. Search and status filters in **Executions** narrow that list without changing template health, user adoption or daily activity. Search matches template names/references, user references and task IDs; use the status selector for outcomes.
+Date, template, and user filters update all analytics. Search and status filters narrow only the **Executions** list. Shared links preserve the selected filters and view.
 
-Success rate counts completed and failed runs; active and cancelled runs are excluded. Average and P95 times use successful runs with timing data and include queue time. P95 is the time within which 95% of those runs finished. Missing timing data is shown as **—**. Dates use UTC.
+Success rate uses completed and failed runs. Average and P95 durations use successful runs with timing data, including queue time; P95 is the 95th percentile. Missing values appear as **—**. Dates use UTC.
 
-**Database history** searches all saved, accessible runs. Execution details load in batches; their matching count includes every search/status match, while analytics cover all runs in the selected dates/templates/users. **All history** includes every saved date, while the chart shows the last 30 days.
+- **Database history** covers all retained, accessible runs and supports loading older executions. **All history** includes every saved date; the activity chart shows the last 30 days.
+- **Service history** (`historySource: service`, the default) uses the Scaffolder API and checks only the latest `maxTasks` runs (default: 200). Use it for custom task stores or permission rules; it has no **All history** option.
 
-**Service history** (the default when the setting is omitted) checks only the latest `maxTasks` runs and warns when older runs are missing. Use it for a custom task store or permission rules. It does not offer All history or loading older runs.
+Analytics exclude inputs, secrets, outputs, and raw logs. Deleted history cannot be recovered.
 
-Inputs, secrets, outputs and raw logs are not included in analytics. Deleted history cannot be recovered.
+Database history reads the standard Scaffolder SQL tables without changing them. SQLite is tested; PostgreSQL needs live validation. Check schema compatibility after Scaffolder upgrades and memory use with large histories.
 
-## Compatibility and development
+## Development
 
-Requires the new Backstage frontend and backend systems, React 18, Backstage UI 0.18, frontend-plugin-api 0.18 and scaffolder-node 0.13.7 or compatible versions. Legacy frontend apps need to migrate before using this plugin.
+```sh
+yarn install
+yarn build
+yarn test
+```
 
-Database history is hosted by a Scaffolder backend module, which receives the Scaffolder database through `coreServices.database`. Template Pulse calls that module over authenticated HTTP using the current user's credentials. The module reads the standard SQLite or PostgreSQL Scaffolder tables without changing them. SQLite is tested locally. PostgreSQL still needs live validation. Check compatibility after Scaffolder upgrades and performance with your history volume; runs in the analytics selection are currently summarized in backend memory. Custom task permission rules should use service history.
+Keep all five packages on the same version. `yarn workspace @template-pulse/plugin start` opens the frontend development app; analytics require an authenticated backend.
 
-Use Node.js 22 or 24: `yarn install`, `yarn build`, `yarn test`. Keep all five packages on the same version. Run `yarn workspace @template-pulse/plugin start` for the standalone frontend development app; analytics require a running backend and authentication.
-
-Apache-2.0 licensed. [Brand assets](plugins/template-pulse/assets/README.md).
-
-See the [Backstage design audit](docs/backstage-design-audit.md) for the official references, package roles and remaining compatibility limits.
+[Apache-2.0](LICENSE) · [Brand assets](plugins/template-pulse/assets/README.md)
