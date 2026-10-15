@@ -3,6 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alibayramli/template-pulse.git"
+  },
+  "homepage": "https://github.com/alibayramli/template-pulse#readme",
+  "bugs": "https://github.com/alibayramli/template-pulse/issues",
   "packageManager": "yarn@4.4.1",
   "engines": {
     "node": "22 || 24"
@@ -17,7 +23,11 @@
     "tsc": "tsc",
     "build": "yarn tsc && backstage-cli repo build --all",
     "test": "backstage-cli repo test --watch=false --maxWorkers=2",
-    "lint": "backstage-cli repo lint"
+    "lint": "backstage-cli repo lint",
+    "check:metadata": "backstage-cli repo fix --check",
+    "pack:release": "yarn build && node scripts/pack-release.mjs",
+    "check:consumer": "node scripts/check-consumer.mjs",
+    "verify:release": "yarn check:metadata && yarn lint && yarn test && yarn pack:release"
   },
   "devDependencies": {
     "@backstage/cli": "0.36.6",
@@ -27,6 +37,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "esbuild": "^0.28.2",
     "jest": "~30.2.0",
     "jsdom": "^27.1.0",
     "typescript": "~5.8.3"

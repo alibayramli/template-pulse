@@ -2,17 +2,16 @@
 
 **[Try the live demo](https://alibayramli.github.io/template-pulse-demo/)** · [Run the demo locally](https://github.com/alibayramli/template-pulse-demo#run-the-showcase)
 
-![Template Pulse](plugins/template-pulse/assets/template-pulse-wordmark.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="plugins/template-pulse/assets/template-pulse-wordmark-inverse.svg">
+  <img src="plugins/template-pulse/assets/template-pulse-wordmark.svg" alt="Template Pulse" width="380" height="80">
+</picture>
 
-See which Backstage templates people use, how often runs succeed, and how long they take. Filter execution history and open the original Scaffolder task to investigate.
-
-- Template health, user activity, and daily execution counts.
-- Date, template, and user filters, plus execution search and status filters.
-- Personal and organization views with permission checks and shareable links.
+See which Backstage templates teams use, how often runs succeed, and how long they take. Explore personal or organization analytics, filter execution history, and open the original Scaffolder task to investigate.
 
 ## Preview
 
-Template Pulse inside a Backstage app, using fictional demo data.
+Template Pulse inside Backstage, using fictional demo data.
 
 ![Template Pulse inside Backstage, with the app navigation, template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
 
@@ -25,75 +24,55 @@ Template Pulse inside a Backstage app, using fictional demo data.
 
 </details>
 
-## Engineering highlights
-
-- **Backstage integration:** React frontend, analytics backend, and Scaffolder history module, with shared TypeScript API types and query logic.
-- **Access control:** backend checks for personal and organization analytics, alongside Scaffolder task permissions.
-- **History sources:** Scaffolder API access or a read-only SQL adapter with pagination for retained executions.
-
 ## Add to Backstage
 
-Requires Node.js 22 or 24, Yarn 4, React 18, and Backstage's new frontend and backend systems. Tested with Backstage 1.55.
+Requires Backstage's new frontend and backend systems, React 18, and Node.js 22 or 24.
 
-Packages are not published yet. Copy all five folders in `plugins/` into your Backstage workspace, then add the dependencies (adjust workspace names if needed):
+The npm preview release is being prepared. Once published, install these packages in your app and backend workspaces:
 
 ```sh
-yarn workspace app add @template-pulse/plugin@workspace:^
-yarn workspace backend add @template-pulse/plugin-backend@workspace:^ @template-pulse/plugin-scaffolder-backend-module-template-pulse@workspace:^ @template-pulse/plugin-common@workspace:^
+yarn workspace app add @abayramli/backstage-plugin-template-pulse@next
+yarn workspace backend add @abayramli/backstage-plugin-template-pulse-backend@next @abayramli/backstage-plugin-template-pulse-common@next
 ```
 
-Add the frontend plugin to your app's existing features and import the Backstage UI stylesheet once:
+Add the frontend plugin to your app's features and import the Backstage UI stylesheet once:
 
 ```tsx
 import '@backstage/ui/css/styles.css';
-import templatePulse from '@template-pulse/plugin';
+import templatePulse from '@abayramli/backstage-plugin-template-pulse';
 
 createApp({ features: [/* existing features, */ templatePulse] });
 ```
 
-Register the backend plugin and history module alongside your existing Scaffolder backend:
+Register the backend plugin alongside your Scaffolder and permission backends:
 
 ```ts
-backend.add(import('@template-pulse/plugin-backend'));
-backend.add(
-  import('@template-pulse/plugin-scaffolder-backend-module-template-pulse'),
-);
+backend.add(import('@abayramli/backstage-plugin-template-pulse-backend'));
 ```
 
-Configure `app-config.yaml`:
+Enable permissions in `app-config.yaml`:
 
 ```yaml
 permission:
   enabled: true
-templatePulse:
-  historySource: database
 ```
 
-Merge the [permission example](examples/permission-policy.ts) into your existing policy. Grant `template-pulse.read` for personal analytics and reserve `template-pulse.read-all` for users allowed to view organization analytics. Scaffolder task permissions still apply.
+Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` for personal analytics and restrict `template-pulse.read-all` to users allowed to view organization analytics. An allow-all policy grants organization access to every authenticated user. Scaffolder task permissions also apply.
 
-Open **/template-pulse**. Task links open Scaffolder runs; template and user links open Catalog entities.
+Open **/template-pulse**. Date, template, and user filters control analytics; search and status narrow the execution list. Results exclude inputs, secrets, outputs, and raw logs.
 
-## How analytics work
-
-Date, template, and user filters update all analytics. Search and status filters narrow only the **Executions** list. Shared links preserve the selected filters and view.
-
-Success rate uses completed and failed runs. Average and P95 durations use successful runs with timing data, including queue time; P95 is the 95th percentile. Missing values appear as **—**. Dates use UTC.
-
-- **Database history** covers all retained, accessible runs and supports loading older executions. **All history** includes every saved date; the activity chart shows the last 30 days.
-- **Service history** (`historySource: service`, the default) uses the Scaffolder API and checks only the latest `maxTasks` runs (default: 200). Use it for custom task stores or permission rules; it has no **All history** option.
-
-Analytics exclude inputs, secrets, outputs, and raw logs. Deleted history cannot be recovered.
-
-Database history reads the standard Scaffolder SQL tables without changing them. SQLite is tested; PostgreSQL needs live validation. Check schema compatibility after Scaffolder upgrades and memory use with large histories.
+By default, analytics cover the latest 200 Scaffolder tasks. For full retained history, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md).
 
 ## Development
 
+Use the pinned Yarn version through Corepack:
+
 ```sh
-yarn install
-yarn build
-yarn test
+corepack yarn install
+corepack yarn build
+corepack yarn test
 ```
 
-Keep all five packages on the same version. `yarn workspace @template-pulse/plugin start` opens the frontend development app; analytics require an authenticated backend.
+See the [publishing guide](docs/publishing.md) for release checks and packaging.
 
-[Apache-2.0](LICENSE) · [Brand assets](plugins/template-pulse/assets/README.md)
+[Apache-2.0](LICENSE)

@@ -1,0 +1,63 @@
+name: Publish npm preview
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: template_pulse_test
+          POSTGRES_PASSWORD: template_pulse_test
+          POSTGRES_DB: template_pulse_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn backstage-cli repo fix --check --publish
+      - run: yarn verify:release
+      - name: Verify PostgreSQL history
+        run: yarn workspace @abayramli/backstage-plugin-scaffolder-backend-module-template-pulse test --watch=false --runInBand src/historyStore.test.ts
+        env:
+          TEMPLATE_PULSE_TEST_POSTGRES_URL: postgresql://template_pulse_test:template_pulse_test@localhost:5432/template_pulse_test
+      - name: Check consumer and block high or critical advisories
+        run: yarn check:consumer --enforce
+      - name: Publish verified archives in dependency order using npm OIDC
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          for package in \
+            template-pulse-common \
+            template-pulse-node \
+            scaffolder-backend-module-template-pulse \
+            template-pulse-backend \
+            template-pulse; do
+            npm publish "artifacts/abayramli-backstage-plugin-${package}-${version}.tgz" \
+              --access public --tag next --provenance --registry=https://registry.npmjs.org
+          done

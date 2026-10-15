@@ -5,7 +5,7 @@ import type { PolicyQuery, PolicyQueryUser } from '@backstage/plugin-permission-
 import {
   executionsReadPermission,
   executionsReadAllPermission,
-} from '@template-pulse/plugin-common';
+} from '@abayramli/backstage-plugin-template-pulse-common';
 
 export function executionHistoryDecision(request: PolicyQuery, user?: PolicyQueryUser) {
   if (isPermission(request.permission, executionsReadPermission)) {
