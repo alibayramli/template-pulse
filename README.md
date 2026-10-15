@@ -10,6 +10,20 @@ See which Backstage templates people use, how often runs succeed, and how long t
 - Date, template, and user filters, plus execution search and status filters.
 - Personal and organization views with permission checks and shareable links.
 
+## Preview
+
+Template health overview with fictional demo data.
+
+![Template Pulse showing template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
+
+More views: [Executions by template](docs/assets/screenshots/executions-by-template.png) · [Executions by user](docs/assets/screenshots/executions-by-user.png).
+
+## Engineering highlights
+
+- **Backstage integration:** React frontend, analytics backend, and Scaffolder history module, with shared TypeScript API types and query logic.
+- **Access control:** backend checks for personal and organization analytics, alongside Scaffolder task permissions.
+- **History sources:** Scaffolder API access or a read-only SQL adapter with pagination for retained executions.
+
 ## Add to Backstage
 
 Requires Node.js 22 or 24, Yarn 4, React 18, and Backstage's new frontend and backend systems. Tested with Backstage 1.55.
