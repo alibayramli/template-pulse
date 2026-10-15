@@ -12,11 +12,18 @@ See which Backstage templates people use, how often runs succeed, and how long t
 
 ## Preview
 
-Template health overview with fictional demo data.
+Template Pulse inside a Backstage app, using fictional demo data.
 
-![Template Pulse showing template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
+![Template Pulse inside Backstage, with the app navigation, template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
 
-More views: [Executions by template](docs/assets/screenshots/executions-by-template.png) · [Executions by user](docs/assets/screenshots/executions-by-user.png).
+<details>
+<summary>Executions by template and user</summary>
+
+![Template Pulse execution history filtered by template inside Backstage](docs/assets/screenshots/executions-by-template.png)
+
+![Template Pulse execution history filtered by user inside Backstage](docs/assets/screenshots/executions-by-user.png)
+
+</details>
 
 ## Engineering highlights
 
