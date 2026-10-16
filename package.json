@@ -42,5 +42,5 @@
     "jsdom": "^27.1.0",
     "typescript": "~5.8.3"
   },
-  "description": "Track the health and adoption of your Backstage templates with execution analytics, performance insights, and searchable run history."
+  "description": "Track Backstage template usage, success rates, and run times, and search past runs."
 }

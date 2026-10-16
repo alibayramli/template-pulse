@@ -7,7 +7,7 @@
   <img src="plugins/template-pulse/assets/template-pulse-wordmark.svg" alt="Template Pulse" width="380" height="80">
 </picture>
 
-See which Backstage templates teams use, how often runs succeed, and how long they take. Explore personal or organization analytics, filter execution history, and open the original Scaffolder task to investigate.
+See which Backstage templates teams use, how often runs succeed, and how long they take. View your own runs or runs across the organization, filter run history, and open the original Scaffolder task for details.
 
 ## Preview
 
@@ -16,11 +16,11 @@ Template Pulse inside Backstage, using fictional demo data.
 ![Template Pulse inside Backstage, with the app navigation, template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
 
 <details>
-<summary>Executions by template and user</summary>
+<summary>Runs by template and user</summary>
 
-![Template Pulse execution history filtered by template inside Backstage](docs/assets/screenshots/executions-by-template.png)
+![Template Pulse run history filtered by template inside Backstage](docs/assets/screenshots/executions-by-template.png)
 
-![Template Pulse execution history filtered by user inside Backstage](docs/assets/screenshots/executions-by-user.png)
+![Template Pulse run history filtered by user inside Backstage](docs/assets/screenshots/executions-by-user.png)
 
 </details>
 
@@ -57,11 +57,11 @@ permission:
   enabled: true
 ```
 
-Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` for personal analytics and restrict `template-pulse.read-all` to users allowed to view organization analytics. An allow-all policy grants organization access to every authenticated user. Scaffolder task permissions also apply.
+Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` so users can view their own runs. Grant `template-pulse.read-all` only to users allowed to view runs across the organization. An allow-all policy lets every signed-in user view runs across the organization. Scaffolder task permissions also apply.
 
-Open **/template-pulse**. Date, template, and user filters control analytics; search and status narrow the execution list. Results exclude inputs, secrets, outputs, and raw logs.
+Open **/template-pulse**. Filter analytics by date, template, or user. Use search and status to narrow the run list. Results do not include inputs, secrets, outputs, or raw logs.
 
-By default, analytics cover the latest 200 Scaffolder tasks. For full retained history, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md).
+By default, analytics cover the latest 200 Scaffolder runs. To include all runs still stored in Scaffolder's database, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md).
 
 ## Development
 
