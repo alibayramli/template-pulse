@@ -16,11 +16,13 @@ Template Pulse inside Backstage, using fictional demo data.
 ![Template Pulse inside Backstage, with the app navigation, template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
 
 <details>
-<summary>Runs by template and user</summary>
+<summary>Team adoption and filtered runs</summary>
 
-![Template Pulse run history filtered by template inside Backstage](docs/assets/screenshots/executions-by-template.png)
+![Template Pulse user adoption filtered by team inside Backstage](docs/assets/screenshots/team-adoption.png)
 
-![Template Pulse run history filtered by user inside Backstage](docs/assets/screenshots/executions-by-user.png)
+![Template Pulse run history filtered by template and failed status inside Backstage](docs/assets/screenshots/executions-by-template.png)
+
+![Template Pulse run history filtered by team and user inside Backstage](docs/assets/screenshots/executions-by-user.png)
 
 </details>
 
