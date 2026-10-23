@@ -3,7 +3,7 @@
 Let Template Pulse read run history directly from Scaffolder's database.
 
 ```sh
-yarn workspace backend add @abayramli/backstage-plugin-scaffolder-backend-module-template-pulse@next
+yarn workspace backend add @abayramli/backstage-plugin-scaffolder-backend-module-template-pulse@0.1.0
 ```
 
 Register it alongside your Scaffolder backend:
