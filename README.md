@@ -30,17 +30,18 @@ Template Pulse inside Backstage, using fictional demo data.
 
 Requires Backstage's new frontend and backend systems, React 18, and Node.js 22 or 24.
 
-The npm preview release is being prepared. Once published, install these packages in your app and backend workspaces:
+Install the latest published packages in your app and backend workspaces:
 
 ```sh
-yarn workspace app add @abayramli/backstage-plugin-template-pulse@next
-yarn workspace backend add @abayramli/backstage-plugin-template-pulse-backend@next @abayramli/backstage-plugin-template-pulse-common@next
+yarn workspace app add @abayramli/backstage-plugin-template-pulse
+yarn workspace backend add @abayramli/backstage-plugin-template-pulse-backend @abayramli/backstage-plugin-template-pulse-common
 ```
 
 Add the frontend plugin to your app's features and import the Backstage UI stylesheet once:
 
 ```tsx
 import '@backstage/ui/css/styles.css';
+import { createApp } from '@backstage/frontend-defaults';
 import templatePulse from '@abayramli/backstage-plugin-template-pulse';
 
 createApp({ features: [/* existing features, */ templatePulse] });
@@ -61,7 +62,7 @@ permission:
 
 Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` so users can view their own runs. Grant `template-pulse.read-all` only to users allowed to view runs across the organization. An allow-all policy lets every signed-in user view runs across the organization. Scaffolder task permissions also apply.
 
-Open **/template-pulse**. Filter analytics by date, template, or user. Use search and status to narrow the run list. Results do not include inputs, secrets, outputs, or raw logs.
+Open **/template-pulse**. Filter analytics by date, template, user, or team. Team filters use the catalog group's current direct members and require organization access. Search, status, and sorting apply to the run list. Use **Copy link** to share a filtered view. Results do not include inputs, secrets, outputs, or raw logs.
 
 By default, analytics cover the latest 200 Scaffolder runs. To include all runs still stored in Scaffolder's database, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md).
 

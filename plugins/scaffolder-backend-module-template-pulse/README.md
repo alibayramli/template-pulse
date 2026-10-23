@@ -1,9 +1,9 @@
 # Template Pulse database history
 
-Let Template Pulse read run history directly from Scaffolder's database.
+Let the Template Pulse backend read all runs still stored in Scaffolder's database. Requires Backstage's new backend system and Node.js 22 or 24.
 
 ```sh
-yarn workspace backend add @abayramli/backstage-plugin-scaffolder-backend-module-template-pulse@0.1.0
+yarn workspace backend add @abayramli/backstage-plugin-scaffolder-backend-module-template-pulse
 ```
 
 Register it alongside your Scaffolder backend:
@@ -12,7 +12,14 @@ Register it alongside your Scaffolder backend:
 backend.add(import('@abayramli/backstage-plugin-scaffolder-backend-module-template-pulse'));
 ```
 
-Set `templatePulse.historySource: database` and configure permissions using the [installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage).
+Select database history in `app-config.yaml`:
+
+```yaml
+templatePulse:
+  historySource: database
+```
+
+Install the Template Pulse frontend and backend and configure permissions using the [installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage). This module uses the same personal and organization permissions as the backend.
 
 - Uses Scaffolder's existing database connection to read its standard SQL tables without changing them. Tested with SQLite and PostgreSQL.
 - Checks the database structure after Scaffolder starts and finishes its migrations.
