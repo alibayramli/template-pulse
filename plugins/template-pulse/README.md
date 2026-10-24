@@ -18,6 +18,6 @@ import templatePulse from '@abayramli/backstage-plugin-template-pulse';
 createApp({ features: [/* existing features, */ templatePulse] });
 ```
 
-Follow the installation guide to register the backend and configure permissions for personal and organization analytics.
+Follow the [installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage) to register the backend and configure permissions for personal and organization analytics.
 
-[Installation](https://github.com/alibayramli/template-pulse#add-to-backstage) · [Live demo](https://alibayramli.github.io/template-pulse-demo/)
+[Live demo](https://alibayramli.github.io/template-pulse-demo/)

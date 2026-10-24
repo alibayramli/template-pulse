@@ -62,20 +62,10 @@ permission:
 
 Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` so users can view their own runs. Grant `template-pulse.read-all` only to users allowed to view runs across the organization. An allow-all policy lets every signed-in user view runs across the organization. Scaffolder task permissions also apply.
 
-Open **/template-pulse**. Filter analytics by date, template, user, or team. Team filters use the catalog group's current direct members and require organization access. Search, status, and sorting apply to the run list. Use **Copy link** to share a filtered view. Results do not include inputs, secrets, outputs, or raw logs.
+Open **/template-pulse**. Filter analytics by date, template, user, or team. Team filters use the catalog group's current direct members and require organization access.
+
+Search, status, and sorting apply to the run list. Use **Copy link** to share a filtered view. Results do not include inputs, secrets, outputs, or raw logs.
 
 By default, analytics cover the latest 200 Scaffolder runs. To include all runs still stored in Scaffolder's database, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md).
-
-## Development
-
-Use the pinned Yarn version through Corepack:
-
-```sh
-corepack yarn install
-corepack yarn build
-corepack yarn test
-```
-
-See the [publishing guide](docs/publishing.md) for release checks and packaging.
 
 [Apache-2.0](LICENSE)

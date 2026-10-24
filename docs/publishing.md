@@ -1,4 +1,4 @@
-# Publishing
+# Publishing (for maintainers)
 
 Use Node.js 24 with npm >=11.5.1 and the pinned Yarn version through Corepack. Keep the root and all five package versions aligned.
 
@@ -46,16 +46,12 @@ Save each configuration. The workflow uses `id-token: write` for [npm trusted pu
 
 ## Later releases
 
-1. Update the root and all five package versions together. On `0.x`, use patch bumps for compatible changes and minor bumps for breaking changes; add a prerelease suffix for previews. Release the first stable major version when the public API is stable, then follow [SemVer](https://semver.org/spec/v2.0.0.html).
-2. Run `corepack yarn install` to update the lockfile, commit the changes to `main`, and wait for CI to pass.
-3. Push a tag matching the version in `package.json`:
+Release Please manages version bumps and tags. In the repository's **Settings > Actions > General**, enable **Allow GitHub Actions to create and approve pull requests**.
 
-   ```sh
-   version=$(node -p "require('./package.json').version")
-   git tag "v${version}"
-   git push origin "v${version}"
-   ```
+1. Push changes to a branch and open a pull request targeting `main`. Use a conventional commit title: `fix:` for fixes, `feat:` for features, or `feat!:` for breaking changes.
+2. Wait for **Verify packages** to pass on Node 22 and 24, then squash and merge. Keep the conventional prefix in the final commit title. `docs:` and `chore:` changes alone do not start a release.
+3. **Publish npm release** opens or updates a release PR with the root and all five package versions aligned. With the current `0.x` configuration, fixes and features get a patch bump; breaking changes get a minor bump.
+4. Review the release PR. If GitHub shows **Approve workflows to run**, approve the runs and wait for CI to pass. Merge this PR when ready to publish.
+5. **Publish npm release** creates the matching `v<version>` tag and GitHub release, repeats validation, and publishes all five packages with provenance through npm OIDC.
 
-**Publish npm release** checks the tag against the package version, repeats validation, then publishes with provenance. Regular versions go to `latest`; prereleases go to `next`. It can also be dispatched against a matching tag.
-
-Published versions cannot be overwritten. For a final release after a prerelease, remove the prerelease suffix from all package versions and push the matching tag through the same cycle.
+Regular versions go to `latest`; prereleases go to `next`. Published versions cannot be overwritten.
