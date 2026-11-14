@@ -1,8 +1,8 @@
-# Publishing (for maintainers)
+# Publishing
 
-Use Node.js 24 with npm >=11.5.1 and the pinned Yarn version through Corepack. Keep the root and all five package versions aligned.
+Use Node.js 24, npm 11.5.1 or newer, and the project's Yarn version through Corepack. Release Please updates versions and tags for you.
 
-## Release checks
+## Check your changes
 
 ```sh
 corepack yarn install --immutable
@@ -10,48 +10,34 @@ corepack yarn verify:release
 corepack yarn check:consumer --enforce
 ```
 
-- `verify:release` runs metadata checks, lint, tests, builds, and archive validation. Packages and checksums go to the ignored `artifacts/` directory.
-- `check:consumer` installs those archives in a separate project, checks backend imports and frontend styles, and audits dependencies. High or critical advisories block publication; details are saved to `artifacts/consumer-audit.json`.
+These commands check, test, build, and pack all five packages, then try installing them in a separate app. High or critical dependency vulnerabilities block the release. Packages and check results are saved in the ignored `artifacts/` folder.
 
-CI also tests Node 22/24 and PostgreSQL. Confirm those jobs pass before releasing.
+GitHub also checks Node.js 22 and 24 and PostgreSQL. Wait for those checks to pass.
 
-## First publish
+## Set up publishing once
 
-Sign in to npm with an account allowed to publish under `@abayramli` and enable two-factor authentication. New packages must be published before their trusted publisher can be configured.
+In GitHub, open **Settings > Actions > General** and enable **Allow GitHub Actions to create and approve pull requests**.
 
-After the checks pass, run this from the repository root in Bash or Git Bash. Complete npm's browser login and any authentication prompts:
+For **each of the five npm packages**, open **Settings > Trusted publishing** and choose **GitHub Actions**:
 
-```sh
-npm login --registry=https://registry.npmjs.org
-version=$(node -p "require('./package.json').version")
-for package in template-pulse-common template-pulse-node scaffolder-backend-module-template-pulse template-pulse-backend template-pulse; do
-  npm publish "./artifacts/abayramli-backstage-plugin-${package}-${version}.tgz" \
-    --access public --tag latest --registry=https://registry.npmjs.org || exit 1
-done
-```
-
-This publishes the built archives in dependency order. Teams can then install using the default `latest` tag. The local first publish has no CI provenance.
-
-## npm authentication for GitHub Actions
-
-For **each of the five packages**, open npmjs.com > package > **Settings > Trusted publishing** and select **GitHub Actions**:
-
-- Organization or user: `alibayramli`
+- User: `alibayramli`
 - Repository: `template-pulse`
 - Workflow filename: `publish.yml`
-- Environment name: leave blank
-- Allowed actions: enable `npm publish`
+- Environment: leave blank
+- **Allow npm publish**: enabled
+- **Allow npm dist-tag**: disabled
 
-Save each configuration. The workflow uses `id-token: write` for [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/). No `NPM_TOKEN`, `NODE_AUTH_TOKEN`, or custom GitHub environment is required. Keep the repository public for provenance.
+Click **Set up connection**. Under **Publishing access**, select **Require two-factor authentication and disallow bypass 2FA tokens**, then click **Update Package Settings**.
 
-## Later releases
+GitHub signs in to npm automatically using [trusted publishing](https://docs.npmjs.com/trusted-publishers/). No saved npm token is needed. Keep the repository public so npm can show where each release was built.
 
-Release Please manages version bumps and tags. In the repository's **Settings > Actions > General**, enable **Allow GitHub Actions to create and approve pull requests**.
+## Publish an update
 
-1. Push changes to a branch and open a pull request targeting `main`. Use a conventional commit title: `fix:` for fixes, `feat:` for features, or `feat!:` for breaking changes.
-2. Wait for **Verify packages** to pass on Node 22 and 24, then squash and merge. Keep the conventional prefix in the final commit title. `docs:` and `chore:` changes alone do not start a release.
-3. **Publish npm release** opens or updates a release PR with the root and all five package versions aligned. With the current `0.x` configuration, fixes and features get a patch bump; breaking changes get a minor bump.
-4. Review the release PR. If GitHub shows **Approve workflows to run**, approve the runs and wait for CI to pass. Merge this PR when ready to publish.
-5. **Publish npm release** creates the matching `v<version>` tag and GitHub release, repeats validation, and publishes all five packages with provenance through npm OIDC.
+1. Push a branch and open a pull request to `main`. Start the title with `fix:` for fixes, `feat:` for features, or `feat!:` for breaking changes.
+2. Wait for **Verify packages** to pass, then squash and merge. Keep that prefix in the final commit title.
+3. Release Please opens a release pull request with the new version. Review it, run its checks, and merge it when ready.
+4. **Publish npm release** creates the tag and GitHub release, checks the packages again, and uploads all five to npm.
 
-Regular versions go to `latest`; prereleases go to `next`. Published versions cannot be overwritten.
+If the release pull request has no checks, run **Verify packages** on its branch from the **Actions** tab.
+
+`docs:` and `chore:` changes alone do not start a release. While versions are below `1.0`, fixes and features get a patch update; breaking changes get a minor update. Regular releases use `latest`; preview releases use `next`. Published versions cannot be replaced.

@@ -7,37 +7,39 @@
   <img src="plugins/template-pulse/assets/template-pulse-wordmark.svg" alt="Template Pulse" width="380" height="80">
 </picture>
 
-See which Backstage templates teams use, how often runs succeed, and how long they take. View your own runs or runs across the organization, filter run history, and open the original Scaffolder task for details.
+See which Backstage templates people use, how often runs succeed, and how long they take. Filter runs by date, template, user, or team, and open the Scaffolder task for details.
 
 ## Preview
 
-Template Pulse inside Backstage, using fictional demo data.
+Template Pulse in Backstage with sample data.
 
-![Template Pulse inside Backstage, with the app navigation, template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
+![Template Pulse showing template usage, success rates, and run times](docs/assets/screenshots/template-health.png)
 
 <details>
-<summary>Team adoption and filtered runs</summary>
+<summary>Teams and run history</summary>
 
-![Template Pulse user adoption filtered by team inside Backstage](docs/assets/screenshots/team-adoption.png)
+![Runs for a selected team](docs/assets/screenshots/team-adoption.png)
 
-![Template Pulse run history filtered by template and failed status inside Backstage](docs/assets/screenshots/executions-by-template.png)
+![Failed runs for a selected template](docs/assets/screenshots/executions-by-template.png)
 
-![Template Pulse run history filtered by team and user inside Backstage](docs/assets/screenshots/executions-by-user.png)
+![Runs for a selected team and user](docs/assets/screenshots/executions-by-user.png)
 
 </details>
 
 ## Add to Backstage
 
-Requires Backstage's new frontend and backend systems, React 18, and Node.js 22 or 24.
+Requires Backstage's new frontend and backend, React 18, and Node.js 22 or 24.
 
-Install the latest published packages in your app and backend workspaces:
+Update all Template Pulse packages together, including the optional history module.
+
+Install the packages:
 
 ```sh
 yarn workspace app add @abayramli/backstage-plugin-template-pulse
 yarn workspace backend add @abayramli/backstage-plugin-template-pulse-backend @abayramli/backstage-plugin-template-pulse-common
 ```
 
-Add the frontend plugin to your app's features and import the Backstage UI stylesheet once:
+Add the plugin to your app and import the Backstage UI styles once:
 
 ```tsx
 import '@backstage/ui/css/styles.css';
@@ -47,7 +49,7 @@ import templatePulse from '@abayramli/backstage-plugin-template-pulse';
 createApp({ features: [/* existing features, */ templatePulse] });
 ```
 
-Register the backend plugin alongside your Scaffolder and permission backends:
+Add the backend alongside your Scaffolder and permission backends:
 
 ```ts
 backend.add(import('@abayramli/backstage-plugin-template-pulse-backend'));
@@ -60,12 +62,17 @@ permission:
   enabled: true
 ```
 
-Use the [permission example](examples/permission-policy.ts) to grant `template-pulse.read` so users can view their own runs. Grant `template-pulse.read-all` only to users allowed to view runs across the organization. An allow-all policy lets every signed-in user view runs across the organization. Scaffolder task permissions also apply.
+Follow the [permission example](examples/permission-policy.ts):
 
-Open **/template-pulse**. Filter analytics by date, template, user, or team. Team filters use the catalog group's current direct members and require organization access.
+- `template-pulse.read` lets users see their own runs.
+- `template-pulse.read-all` lets users see runs across the organization.
 
-Search, status, and sorting apply to the run list. Use **Copy link** to share a filtered view. Results do not include inputs, secrets, outputs, or raw logs.
+Scaffolder task permissions also apply. An allow-all policy lets every signed-in user see runs across the organization.
 
-By default, analytics cover the latest 200 Scaffolder runs. To include all runs still stored in Scaffolder's database, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md).
+Open **/template-pulse**. Team filters require `template-pulse.read-all` and use the group's current direct members.
+
+Search, status, and sorting change only the run list. Use **Copy link** to share your filters. Inputs, secrets, outputs, and raw logs are not shown.
+
+By default, the dashboard covers the latest 200 Scaffolder runs. Add the [database history module](plugins/scaffolder-backend-module-template-pulse/README.md) for older runs and searchable filters. Its guide covers limits and setup for multiple backend servers.
 
 [Apache-2.0](LICENSE)
