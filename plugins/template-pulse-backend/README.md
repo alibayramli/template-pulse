@@ -1,6 +1,6 @@
 # Template Pulse backend
 
-Analytics for Scaffolder runs, controlled by Backstage permissions.
+Provides template usage, success rates, and run times. Backstage permissions control who can view runs.
 
 Requires Backstage's new backend system and Node.js 22 or 24.
 
@@ -8,12 +8,16 @@ Requires Backstage's new backend system and Node.js 22 or 24.
 yarn workspace backend add @abayramli/backstage-plugin-template-pulse-backend @abayramli/backstage-plugin-template-pulse-common
 ```
 
-Register it alongside your Scaffolder and permission backends:
+Add it alongside your Scaffolder and permission backends:
 
 ```ts
 backend.add(import('@abayramli/backstage-plugin-template-pulse-backend'));
 ```
 
-Follow the [installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage) to enable permissions and choose who can view their own runs or runs across the organization. Team filters require organization access and use the catalog group's current direct members.
+Follow the [installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage) to set permissions. Team filters use each group's current direct members and require `template-pulse.read-all`.
 
-By default, the backend reads the latest 200 Scaffolder runs through its public API (`templatePulse.historySource: service`). Add the optional [database history module](https://github.com/alibayramli/template-pulse/tree/main/plugins/scaffolder-backend-module-template-pulse) and set `templatePulse.historySource: database` to include all runs still stored in Scaffolder's database.
+By default, it reads the latest 200 Scaffolder runs (`templatePulse.historySource: service`). For older saved runs, add the [database history module](https://github.com/alibayramli/template-pulse/tree/main/plugins/scaffolder-backend-module-template-pulse) and set `templatePulse.historySource: database`.
+
+Large task logs can leave run times blank in service mode. If a search is too large or the service is busy, narrow the filters and try again.
+
+Update all Template Pulse packages together.

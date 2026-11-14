@@ -1,13 +1,16 @@
 # Template Pulse common
 
-Shared execution types, status labels, and permissions for the frontend and backend.
+Shared types, status labels, and permissions.
 
-The plugins install this package automatically. Add it directly when your permission policy imports its permissions:
+Installed automatically with the plugins. Add it directly when your permission policy imports it:
 
 ```sh
 yarn workspace backend add @abayramli/backstage-plugin-template-pulse-common
 ```
 
-Use `executionsReadPermission` (`template-pulse.read`) for personal analytics and `executionsReadAllPermission` (`template-pulse.read-all`) for organization analytics. The host app's permission policy decides who receives each permission.
+Your app's permission policy grants:
+
+- `executionsReadPermission` (`template-pulse.read`) for a user's own runs.
+- `executionsReadAllPermission` (`template-pulse.read-all`) for runs across the organization.
 
 [Installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage)
