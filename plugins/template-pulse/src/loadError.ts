@@ -28,6 +28,16 @@ export function getLoadError(cause: unknown, target: LoadTarget): LoadError {
     retryable,
   });
 
+  if (target === 'pagination' && /cursor/i.test(message))
+    return {
+      ...guidance(
+        'Reload these runs',
+        'This run list has expired or changed. Reload this view to continue.',
+        true,
+      ),
+      target: 'analytics' as const,
+    };
+
   if (
     /Database history requires .*scaffolder-backend-module-template-pulse/i.test(
       message,
@@ -99,6 +109,20 @@ export function getLoadError(cause: unknown, target: LoadTarget): LoadError {
   if (status === 429)
     return guidance(
       'Too many requests',
+      'Wait a moment, then try again. Your filters will stay the same.',
+      true,
+    );
+
+  if (/time limit|timed out|SQLite history analytics cover up to/i.test(message))
+    return guidance(
+      'This search needs narrower filters',
+      'Choose a shorter date range or a specific template or user, then try again.',
+      true,
+    );
+
+  if (status === 503 || error?.name === 'ServiceUnavailableError')
+    return guidance(
+      'Analytics are busy',
       'Wait a moment, then try again. Your filters will stay the same.',
       true,
     );

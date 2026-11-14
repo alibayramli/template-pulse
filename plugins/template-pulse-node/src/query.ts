@@ -12,6 +12,7 @@ import {
   executionSortFields,
   type ExecutionQuery,
   type ExecutionSortField,
+  type ExecutionFacet,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 
 /** Validate the execution analytics HTTP query. @public */
@@ -58,6 +59,11 @@ export function parseExecutionQuery(
     (!/^\d+$/.test(offset) || !Number.isSafeInteger(Number(offset)))
   )
     throw new InputError('Invalid offset');
+  const cursor = value('cursor', 512);
+  if (cursor && !/^[A-Za-z0-9_.:-]+$/.test(cursor))
+    throw new InputError('Invalid history cursor');
+  if (cursor && Number(offset ?? 0) !== 0)
+    throw new InputError('History cursor cannot be combined with an offset');
   const sortBy = value('sortBy');
   if (sortBy && !executionSortFields.includes(sortBy as ExecutionSortField))
     throw new InputError('Invalid sortBy');
@@ -89,9 +95,28 @@ export function parseExecutionQuery(
     query: value('query', 200)?.trim(),
     allTime: allTime === 'true',
     offset: Number(offset ?? 0),
+    ...(cursor ? { cursor } : {}),
     sortBy: (sortBy as ExecutionSortField | undefined) ?? 'createdAt',
     sortDirection: sortDirection === 'ascending' ? 'ascending' : 'descending',
   };
+}
+
+/** Validate a server-side search for authorized history filter choices. @public */
+export function parseExecutionFacetQuery(values: Record<string, unknown>): {
+  query: ExecutionQuery;
+  facet: ExecutionFacet;
+  search: string;
+} {
+  const query = parseExecutionQuery(values);
+  if (query.cursor || query.offset)
+    throw new InputError('Facet search does not accept pagination parameters');
+  const facet = values.facet;
+  if (facet !== 'template' && facet !== 'user')
+    throw new InputError('facet must be template or user');
+  const search = values.facetQuery ?? '';
+  if (typeof search !== 'string' || search.length > 200)
+    throw new InputError('Invalid facetQuery');
+  return { query, facet, search: search.trim() };
 }
 
 /** Check analytics access and prevent queries for another user's personal history. @public */

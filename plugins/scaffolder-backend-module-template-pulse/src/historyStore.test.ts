@@ -208,7 +208,7 @@ it('enforces task permissions before returning rows, counts, facets and metrics 
   const result = await store.search(query, 'user:default/alice', own, 200);
   expect(result.items.map(item => item.id)).toEqual(['alice-run']);
   expect(result.summary.total).toBe(1);
-  expect(result.window.sourceTotal).toBe(1);
+  expect(result.window.sourceTotal).toBeUndefined();
   expect(result.facets.users).toEqual(['user:default/alice']);
   expect(result.facets.templates.map(item => item.name)).toEqual([
     'API Service',
@@ -395,7 +395,7 @@ it('aggregates complete history beyond the response bound while SQL paginates de
   const all = await bounded.search(query, 'user:default/alice', allow, 1);
   expect(all.summary.total).toBe(3);
   expect(all.items).toHaveLength(1);
-  expect(all.page).toEqual({ offset: 0, limit: 1, total: 3, hasMore: true });
+  expect(all.page).toMatchObject({ offset: 0, limit: 1, total: 3, hasMore: true });
   expect(all.window.scanned).toBe(3);
   expect(all.window.truncated).toBe(false);
   const result = await bounded.search(
@@ -409,7 +409,7 @@ it('aggregates complete history beyond the response bound while SQL paginates de
   expect(result.facets.users).toEqual(['user:default/alice']);
 });
 
-it('bounds facets even when the date selection is empty and validates the memory limit', async () => {
+it('returns empty facets when the date selection is empty and validates the memory limit', async () => {
   await insert('one', 'alice', 'One');
   await insert('two', 'alice', 'Two');
   const bounded = new DatabaseHistoryStore(async () => db, 1);
@@ -420,7 +420,11 @@ it('bounds facets even when the date selection is empty and validates the memory
       allow,
       200,
     ),
-  ).rejects.toThrow('Too many history filter choices');
+  ).resolves.toMatchObject({
+    items: [],
+    summary: { total: 0 },
+    facets: { templates: [] },
+  });
   const getClient = async () => db;
   for (const limit of [0, -1, 1.5, 100_001, NaN, Infinity]) {
     expect(() => new DatabaseHistoryStore(getClient, limit)).toThrow(

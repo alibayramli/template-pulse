@@ -1,9 +1,13 @@
+import { useEffect, useState } from 'react';
 import {
+  Button,
   ButtonIcon,
   Select,
   SelectItemText,
+  Text,
   Tooltip,
   TooltipTrigger,
+  type SelectSearch,
 } from '@backstage/ui';
 import { parseEntityRef } from '@backstage/catalog-model';
 
@@ -59,18 +63,109 @@ export type EntityFilterOption = {
   description?: string;
 };
 
+export type EntityFilterSearch = (
+  query: string,
+  signal: AbortSignal,
+) => Promise<{ items: EntityFilterOption[]; hasMore: boolean }>;
+
 export function EntityFilterSelect({
   label,
   value,
   options,
   onChange,
+  loadOptions,
+  hasMore = false,
 }: {
   label: string;
   value: string;
   options: EntityFilterOption[];
   onChange: (value: string) => void;
+  loadOptions?: EntityFilterSearch;
+  hasMore?: boolean;
 }) {
-  return (
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [selectedOption, setSelectedOption] = useState<EntityFilterOption>();
+  const [remote, setRemote] = useState<{
+    source: EntityFilterSearch;
+    search: string;
+    items: EntityFilterOption[];
+    hasMore: boolean;
+  }>();
+  useEffect(() => setSearch(''), [value, loadOptions]);
+  useEffect(() => {
+    if (!loadOptions || !search.trim()) {
+      setLoading(false);
+      setFailed(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    setFailed(false);
+    const timer = setTimeout(() => {
+      loadOptions(search, controller.signal)
+        .then(page => {
+          if (!controller.signal.aborted)
+            setRemote({ source: loadOptions, search, ...page });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setFailed(true);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadOptions, search, retry]);
+  const page =
+    remote && remote.source === loadOptions && remote.search === search
+      ? remote
+      : undefined;
+  const knownOptions = new Map(options.map(item => [item.id, item]));
+  const retainLabel = (item: EntityFilterOption) => {
+    const known = knownOptions.get(item.id);
+    if (known && known.label !== known.id) return known;
+    if (selectedOption?.id === item.id) return selectedOption;
+    return item;
+  };
+  const visibleOptions = loadOptions
+    ? [
+        ...new Map(
+          [
+            ...options.filter(item => item.id === 'any' || item.id === value),
+            ...(page?.items ?? (search ? [] : options)),
+          ].map(item => [item.id, retainLabel(item)]),
+        ).values(),
+      ]
+    : options;
+  const moreOptions = page?.hasMore ?? hasMore;
+  let searchConfig: SelectSearch<EntityFilterOption> | undefined;
+  if (loadOptions) {
+    searchConfig = {
+      mode: 'server',
+      inputValue: search,
+      onInputChange: input => setSearch(input.slice(0, 200)),
+      placeholder: `Search ${label.toLowerCase()}s…`,
+    };
+  } else if (options.length > 10) {
+    searchConfig = {
+      placeholder: `Search ${label.toLowerCase()}s…`,
+      filter: (item, query) =>
+        `${item.label} ${item.description ?? ''} ${item.id}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+    };
+  }
+  let statusMessage = 'More matches available. Refine your search.';
+  if (loading) statusMessage = 'Searching…';
+  if (failed) statusMessage = 'Options could not be loaded. ';
+
+  const select = (
     <div
       className="template-pulse-analytics-clearable-select"
       data-active={value !== 'any' || undefined}
@@ -80,19 +175,17 @@ export function EntityFilterSelect({
         size="small"
         selectionMode="single"
         value={value}
-        items={options}
-        search={
-          options.length > 10
-            ? {
-                placeholder: `Search ${label.toLowerCase()}s…`,
-                filter: (item: EntityFilterOption, query: string) =>
-                  `${item.label} ${item.description ?? ''} ${item.id}`
-                    .toLowerCase()
-                    .includes(query.toLowerCase()),
-              }
-            : undefined
+        items={visibleOptions}
+        loading={
+          loadOptions ? { state: loading ? 'filtering' : 'idle' } : undefined
         }
-        onChange={key => onChange(String(key ?? 'any'))}
+        search={searchConfig}
+        onChange={key => {
+          const next = String(key ?? 'any');
+          if (loadOptions)
+            setSelectedOption(visibleOptions.find(item => item.id === next));
+          onChange(next);
+        }}
       >
         {item => (
           <SelectItemText
@@ -114,6 +207,28 @@ export function EntityFilterSelect({
           />
           <Tooltip>Clear {label.toLowerCase()} filter</Tooltip>
         </TooltipTrigger>
+      )}
+    </div>
+  );
+  if (!loadOptions) return select;
+  return (
+    <div>
+      {select}
+      {(loading || failed || moreOptions) && (
+        <div role={failed ? 'alert' : 'status'}>
+          <Text variant="body-small" color="secondary">
+            {statusMessage}
+          </Text>
+          {failed && (
+            <Button
+              size="small"
+              variant="tertiary"
+              onPress={() => setRetry(attempt => attempt + 1)}
+            >
+              Retry
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

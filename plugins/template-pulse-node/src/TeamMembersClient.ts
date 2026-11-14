@@ -16,12 +16,22 @@ export class TeamMembersClient {
     },
   ) {}
 
-  async getMembers(teamRef: string, credentials: BackstageCredentials) {
+  async getMembers(
+    teamRef: string,
+    credentials: BackstageCredentials,
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
     const catalog = new CatalogClient({
       discoveryApi: this.options.discovery,
       fetchApi: {
         fetch: (input, init) =>
-          fetch(input, { ...init, signal: AbortSignal.timeout(30_000) }),
+          fetch(input, {
+            ...init,
+            signal: signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+              : AbortSignal.timeout(30_000),
+          }),
       },
     });
     const { token } = await this.options.auth.getPluginRequestToken({

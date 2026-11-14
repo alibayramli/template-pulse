@@ -102,6 +102,7 @@ export function AnalyticsDashboard({
   const {
     result,
     facets,
+    searchFacets,
     userRefs,
     userNames,
     teams,
@@ -115,6 +116,10 @@ export function AnalyticsDashboard({
     loadMore,
   } = useExecutionAnalytics(selection, revision);
   const hasExecutionFilters = Boolean(search || status !== 'any');
+  const canLoadMore =
+    result?.page.hasMore &&
+    !result.page.continuationUnavailable &&
+    error?.target !== 'analytics';
   const metrics = result?.summary;
   const updateMessage = showLoadingIndicator
     ? `Updating ${
@@ -124,10 +129,12 @@ export function AnalyticsDashboard({
   return (
     <Flex direction="column" gap="3">
       <DashboardFilters
+        key={revision}
         selection={selection}
         onChange={onChange}
         canSearchHistory={canSearchHistory}
         facets={facets}
+        searchFacets={searchFacets}
         userRefs={userRefs}
         userNames={userNames}
         teams={teams}
@@ -201,6 +208,11 @@ export function AnalyticsDashboard({
             </TabList>
             <TabPanel id="templates">
               <Flex direction="column" gap="2" pt="2">
+                {result.rollupsTruncated?.templates && (
+                  <Text variant="body-small" color="secondary" role="status">
+                    Showing the most used templates. Search the template filter to find others. Summary totals include all matching runs.
+                  </Text>
+                )}
                 <RollupTable
                   rows={result.templates}
                   isStale={loading && !updatingExecutions}
@@ -219,6 +231,11 @@ export function AnalyticsDashboard({
             {scope === 'all' && (
               <TabPanel id="users">
                 <Flex direction="column" gap="2" pt="2">
+                  {result.rollupsTruncated?.users && (
+                    <Text variant="body-small" color="secondary" role="status">
+                      Showing the most active users. Search the user filter to find others. Summary totals include all matching runs.
+                    </Text>
+                  )}
                   <RollupTable
                     rows={result.users}
                     isStale={loading && !updatingExecutions}
@@ -295,7 +312,12 @@ export function AnalyticsDashboard({
                       sortDirection={sortDirection}
                       onSortChange={onChange}
                     />
-                    {result.page.hasMore && (
+                    {result.page.continuationUnavailable && (
+                      <Text variant="body-small" color="secondary" role="status">
+                        Narrow the run filters to load more results.
+                      </Text>
+                    )}
+                    {canLoadMore && (
                       <Flex
                         align="center"
                         justify="between"

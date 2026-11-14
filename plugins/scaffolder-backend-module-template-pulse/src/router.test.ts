@@ -159,6 +159,7 @@ it('validates queries and passes task authorization and caller identity to the s
     'user:default/alice',
     decision,
     200,
+    expect.any(AbortSignal),
   );
   expect(authorizeConditional.mock.calls[0][0][0].permission.name).toBe(
     'scaffolder.task.read',

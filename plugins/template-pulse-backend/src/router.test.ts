@@ -139,6 +139,7 @@ it('validates queries and forwards caller credentials to the history client', as
     }),
     credentials,
     200,
+    expect.any(AbortSignal),
   );
 });
 

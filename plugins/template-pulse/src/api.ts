@@ -10,6 +10,8 @@ import {
 import type {
   ExecutionAccess,
   ExecutionAnalytics,
+  ExecutionFacet,
+  ExecutionFacetPage,
   ExecutionQuery,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 
@@ -20,6 +22,12 @@ export interface ExecutionsApi {
     query: ExecutionQuery,
     signal?: AbortSignal,
   ): Promise<ExecutionAnalytics>;
+  getFacets?(
+    query: ExecutionQuery,
+    facet: ExecutionFacet,
+    search: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutionFacetPage>;
   /** Optional catalog labels; retained users without catalog entries keep their references. */
   getUserNames?(
     refs: string[],
@@ -52,6 +60,19 @@ export class ExecutionsClient implements ExecutionsApi {
       if (value !== undefined && value !== '' && value !== false)
         params.set(key, String(value));
     return this.get<ExecutionAnalytics>(`/analytics?${params}`, signal);
+  }
+
+  getFacets(
+    query: ExecutionQuery,
+    facet: ExecutionFacet,
+    search: string,
+    signal?: AbortSignal,
+  ) {
+    const params = new URLSearchParams({ facet, facetQuery: search });
+    for (const [key, value] of Object.entries(query))
+      if (value !== undefined && value !== '' && value !== false)
+        params.set(key, String(value));
+    return this.get<ExecutionFacetPage>(`/facets?${params}`, signal);
   }
 
   async getUserNames(refs: string[], signal?: AbortSignal) {

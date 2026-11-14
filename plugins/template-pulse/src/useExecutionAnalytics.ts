@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApi } from '@backstage/frontend-plugin-api';
-import type { ExecutionAnalytics, ExecutionQuery } from '@abayramli/backstage-plugin-template-pulse-common';
+import type {
+  ExecutionAnalytics,
+  ExecutionFacet,
+  ExecutionQuery,
+} from '@abayramli/backstage-plugin-template-pulse-common';
 import { executionsApiRef } from './api';
 import type { DashboardSelection } from './dashboardState';
 import { getLoadError, type LoadError } from './loadError';
@@ -157,18 +161,7 @@ export function useExecutionAnalytics(
             if (controller.signal.aborted) return;
             resultQuery.current = analyticsQuery;
             setResult(data);
-            setFacets(previousFacets => ({
-              templates: [
-                ...new Map(
-                  [...previousFacets.templates, ...data.facets.templates].map(
-                    item => [item.id, item],
-                  ),
-                ).values(),
-              ].sort((a, b) => a.name.localeCompare(b.name)),
-              users: [
-                ...new Set([...previousFacets.users, ...data.facets.users]),
-              ].sort(),
-            }));
+            setFacets(data.facets);
           })
           .catch(cause => {
             if (!controller.signal.aborted) {
@@ -199,6 +192,14 @@ export function useExecutionAnalytics(
     };
   }, [api, analyticsQuery, query, revision, invalidRange]);
 
+  const searchFacets = useCallback(
+    (facet: ExecutionFacet, searchTerm: string, signal: AbortSignal) => {
+      if (!api.getFacets) throw new Error('Filter search is unavailable');
+      return api.getFacets(analyticsQuery, facet, searchTerm, signal);
+    },
+    [api, analyticsQuery],
+  );
+
   const loadMore = async () => {
     if (
       !result?.page.hasMore ||
@@ -209,12 +210,21 @@ export function useExecutionAnalytics(
       loadingMore
     )
       return;
+    if (!result.page.nextCursor) {
+      setError(
+        getLoadError(
+          new Error('History cursor unavailable. Reload this view.'),
+          'pagination',
+        ),
+      );
+      return;
+    }
     const controller = requestController.current;
     setLoadingMore(true);
     setError(undefined);
     try {
       const data = await api.getAnalytics(
-        { ...query, offset: result.items.length },
+        { ...query, cursor: result.page.nextCursor },
         controller.signal,
       );
       if (!controller.signal.aborted)
@@ -243,6 +253,10 @@ export function useExecutionAnalytics(
   return {
     result,
     facets,
+    searchFacets:
+      result?.window.historySource === 'database' && api.getFacets && !invalidRange
+        ? searchFacets
+        : undefined,
     userRefs,
     userNames,
     teams,

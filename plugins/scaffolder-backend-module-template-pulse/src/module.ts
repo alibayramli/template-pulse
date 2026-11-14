@@ -21,6 +21,7 @@ export const scaffolderModuleTemplatePulse = createBackendModule({
         lifecycle: coreServices.lifecycle,
         auth: coreServices.auth,
         discovery: coreServices.discovery,
+        cache: coreServices.cache,
       },
       async init({
         database,
@@ -29,6 +30,7 @@ export const scaffolderModuleTemplatePulse = createBackendModule({
         lifecycle,
         auth,
         discovery,
+        cache,
         ...services
       }) {
         if (config.getOptionalBoolean('permission.enabled') !== true)
@@ -40,6 +42,7 @@ export const scaffolderModuleTemplatePulse = createBackendModule({
         const historyStore = new DatabaseHistoryStore(
           () => database.getClient(),
           config.getOptionalNumber('templatePulse.maxHistoryRows') ?? 10_000,
+          { cache },
         );
         if (
           config.getOptionalString('templatePulse.historySource') === 'database'

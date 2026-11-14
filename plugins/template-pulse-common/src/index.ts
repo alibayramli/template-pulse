@@ -82,6 +82,8 @@ export type ExecutionQuery = {
   allTime?: boolean;
   /** Offset into filtered execution details; summaries cover the selected date/template/user cohort. */
   offset?: number;
+  /** Continue a short-lived, authorized snapshot of the ordered run IDs. */
+  cursor?: string;
   /** Sort all matching details before pagination. Defaults to createdAt descending. */
   sortBy?: ExecutionSortField;
   /** Missing values sort last; equal values use task ID descending for stable pagination. */
@@ -121,6 +123,15 @@ export type DailyActivity = {
   total: number;
 };
 
+/** Searchable retained-history filter dimension. @public */
+export type ExecutionFacet = 'template' | 'user';
+
+/** Bounded filter choices; refine the search when more matches exist. @public */
+export type ExecutionFacetPage = {
+  items: { id: string; name: string }[];
+  hasMore: boolean;
+};
+
 /** Permission-aware analytics over retained execution history. @public */
 export type ExecutionAnalytics = {
   /** Execution details matching search and status within the analytics cohort. */
@@ -130,9 +141,23 @@ export type ExecutionAnalytics = {
   templates: ExecutionRollup[];
   users: ExecutionRollup[];
   activity: DailyActivity[];
-  facets: { templates: { id: string; name: string }[]; users: string[] };
+  facets: {
+    templates: { id: string; name: string }[];
+    users: string[];
+    hasMore?: { templates: boolean; users: boolean };
+  };
+  /** Rollup lists may be bounded without reducing the complete summary metrics. */
+  rollupsTruncated?: { templates: boolean; users: boolean };
   /** Pagination and total for filtered execution details, independent of summary.total. */
-  page: { offset: number; limit: number; total: number; hasMore: boolean };
+  page: {
+    offset: number;
+    limit: number;
+    total: number;
+    hasMore: boolean;
+    nextCursor?: string;
+    /** Narrow the run filters when a stable snapshot exceeds its resource budget. */
+    continuationUnavailable?: boolean;
+  };
   window: {
     historySource?: 'database' | 'service';
     limit: number;
