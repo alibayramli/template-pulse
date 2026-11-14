@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -11,7 +11,11 @@ import {
   TooltipTrigger,
 } from '@backstage/ui';
 import { parseDate, today } from '@internationalized/date';
-import type { ExecutionAnalytics } from '@abayramli/backstage-plugin-template-pulse-common';
+import type {
+  ExecutionAnalytics,
+  ExecutionFacet,
+  ExecutionFacetPage,
+} from '@abayramli/backstage-plugin-template-pulse-common';
 import {
   recentRange,
   type DashboardSelection,
@@ -33,6 +37,7 @@ export function DashboardFilters({
   teams,
   teamsError,
   invalidRange,
+  searchFacets,
 }: {
   selection: DashboardSelection;
   onChange: ChangeSelection;
@@ -43,10 +48,45 @@ export function DashboardFilters({
   teams: { id: string; name: string }[];
   teamsError: boolean;
   invalidRange: boolean;
+  searchFacets?: (
+    facet: ExecutionFacet,
+    search: string,
+    signal: AbortSignal,
+  ) => Promise<ExecutionFacetPage>;
 }) {
   const { scope, range, allHistory, template, user, team } = selection;
   const [rangeWarning, setRangeWarning] = useState<string>();
   const [draftRange, setDraftRange] = useState(range);
+  const loadTemplates = useCallback(
+    async (search: string, signal: AbortSignal) => {
+      if (!searchFacets) throw new Error('Filter search is unavailable');
+      const page = await searchFacets('template', search, signal);
+      return {
+        ...page,
+        items: page.items.map(item => ({
+          id: item.id,
+          label: item.name,
+          description: item.id,
+        })),
+      };
+    },
+    [searchFacets],
+  );
+  const loadUsers = useCallback(
+    async (search: string, signal: AbortSignal) => {
+      if (!searchFacets) throw new Error('Filter search is unavailable');
+      const page = await searchFacets('user', search, signal);
+      return {
+        ...page,
+        items: page.items.map(item => ({
+          id: item.id,
+          label: item.name === item.id ? entityFilterName(item.id) : item.name,
+          description: item.id,
+        })),
+      };
+    },
+    [searchFacets],
+  );
   const rangeStart = range.start.toString();
   const rangeEnd = range.end.toString();
   useEffect(() => {
@@ -264,6 +304,8 @@ export function DashboardFilters({
               label="Template"
               value={template}
               onChange={value => onChange({ template: value })}
+              loadOptions={searchFacets ? loadTemplates : undefined}
+              hasMore={facets.hasMore?.templates}
               options={[
                 { id: 'any', label: 'All templates' },
                 ...templateOptions.map(item => ({
@@ -289,6 +331,8 @@ export function DashboardFilters({
                 label="User"
                 value={user}
                 onChange={value => onChange({ user: value })}
+                loadOptions={searchFacets ? loadUsers : undefined}
+                hasMore={facets.hasMore?.users}
                 options={[{ id: 'any', label: 'All users' }, ...userOptions]}
               />
             )}

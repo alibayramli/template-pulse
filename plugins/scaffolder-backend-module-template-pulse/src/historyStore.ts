@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
-import { InputError, NotAllowedError } from '@backstage/errors';
+import type { CacheService } from '@backstage/backend-plugin-api';
+import { InputError, NotAllowedError, ServiceUnavailableError } from '@backstage/errors';
 import {
   AuthorizeResult,
   type PermissionCondition,
@@ -10,6 +11,8 @@ import type {
   DailyActivity,
   Execution,
   ExecutionAnalytics,
+  ExecutionFacet,
+  ExecutionFacetPage,
   ExecutionQuery,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 import {
@@ -19,6 +22,8 @@ import {
   metricsQuery,
   orderExecutionDetails,
 } from './historySql';
+import { HistoryWorkload, type RunHistoryQuery } from './historyWorkload';
+import { HistorySnapshots, MAX_SNAPSHOT_IDS, snapshotBinding } from './historySnapshots';
 
 type HistoryQuery = ExecutionQuery & { teamMembers?: string[] };
 
@@ -66,11 +71,15 @@ function isoDate(value: Date | string) {
 /** Read-only adapter for the standard Scaffolder SQL task store. */
 export class DatabaseHistoryStore {
   private database?: Promise<Knex>;
+  private readonly workload = new HistoryWorkload();
+  private readonly snapshots: HistorySnapshots;
 
   constructor(
     private readonly getClient: () => Promise<Knex>,
     private readonly maxHistoryRows = 10_000,
+    options: { cache?: CacheService } = {},
   ) {
+    this.snapshots = new HistorySnapshots(options.cache);
     if (
       !Number.isInteger(maxHistoryRows) ||
       maxHistoryRows < 1 ||
@@ -132,7 +141,33 @@ export class DatabaseHistoryStore {
     callerRef: string,
     decision: QueryPermissionResponse,
     limit: number,
+    signal?: AbortSignal,
   ): Promise<ExecutionAnalytics> {
+    this.validateAccess(query, decision);
+    signal?.throwIfAborted();
+    const binding = snapshotBinding(query, callerRef, decision, limit);
+    const snapshot = query.cursor
+      ? await this.snapshots.read(query.cursor, binding)
+      : undefined;
+    const db = await this.getDatabase();
+    const postgres = this.isPostgres(db);
+    const result = await this.workload.run(
+      db,
+      postgres,
+      signal,
+      (transaction, run) => this.searchDatabase(transaction, postgres, query, callerRef, decision, limit, run, snapshot),
+    );
+    if (result.analytics.page.hasMore) {
+      const id = snapshot?.id ?? (result.snapshotIds
+        ? await this.snapshots.create(result.snapshotIds, binding, callerRef)
+        : undefined);
+      if (id) result.analytics.page.nextCursor = `${id}.${result.analytics.page.offset + limit}`;
+      else result.analytics.page.continuationUnavailable = true;
+    }
+    return result.analytics;
+  }
+
+  private validateAccess(query: HistoryQuery, decision: QueryPermissionResponse) {
     if (query.teamRef && !query.teamMembers)
       throw new InputError(
         'Team membership must be resolved before reading history',
@@ -148,35 +183,19 @@ export class DatabaseHistoryStore {
         'Unsupported Scaffolder task permission decision',
       );
     }
-    const db = await this.getDatabase();
-    const postgres = ['pg', 'postgres', 'postgresql'].includes(
-      db.client.config.client,
-    );
-    // A single snapshot keeps counts, metrics and details consistent during active task updates.
-    return db.transaction(
-      transaction =>
-        this.searchDatabase(
-          transaction,
-          postgres,
-          query,
-          callerRef,
-          decision,
-          limit,
-        ),
-      postgres
-        ? { isolationLevel: 'repeatable read', readOnly: true }
-        : undefined,
-    );
   }
 
-  private async searchDatabase(
+  private isPostgres(db: Knex) {
+    return ['pg', 'postgres', 'postgresql'].includes(db.client.config.client);
+  }
+
+  private metadataQueries(
     db: Knex,
     postgres: boolean,
     query: HistoryQuery,
     callerRef: string,
     decision: QueryPermissionResponse,
-    limit: number,
-  ): Promise<ExecutionAnalytics> {
+  ) {
     const json = (column: string, path: string[]) =>
       postgres
         ? `(${column}::jsonb #>> '{${path.join(',')}}')`
@@ -226,36 +245,91 @@ export class DatabaseHistoryStore {
           db.raw(`${templateName} AS template_name`),
           db.raw(`${userRef} AS user_ref`),
         );
-    const latestTemplates = db
-      .from(metadata(base).as('authorized'))
-      .select(
-        'template_ref AS id',
-        'template_name AS name',
-        db.raw(
-          'ROW_NUMBER() OVER (PARTITION BY template_ref ORDER BY created_at DESC, id DESC) AS latest_rank',
-        ),
-      );
+    return { base, metadata, templateRef };
+  }
 
-    // Facets cover authorized retained history, including templates outside the current date range.
-    // A transaction has one connection; execute its statements sequentially.
-    const counts = await base.clone().count({ total: 't.id' }).first();
-    const templateChoices = await db
-      .from(latestTemplates.as('template_choices'))
-      .select('id', 'name')
-      .where('latest_rank', 1)
-      .limit(this.maxHistoryRows + 1);
-    const userChoices = await base
-      .clone()
-      .distinct(db.raw(`${userRef} as ref`))
-      .limit(this.maxHistoryRows + 1);
-    if (
-      templateChoices.length > this.maxHistoryRows ||
-      userChoices.length > this.maxHistoryRows
-    ) {
-      throw new InputError(
-        'Too many history filter choices. Select a user or ask your administrator to review templatePulse.maxHistoryRows.',
-      );
+  private facetChoices(db: Knex, source: Knex.QueryBuilder, facet: ExecutionFacet, search = '') {
+    const choices = facet === 'template'
+      ? db.from(db.from(source.clone().as('authorized')).select(
+          'template_ref AS id',
+          'template_name AS name',
+          db.raw('ROW_NUMBER() OVER (PARTITION BY template_ref ORDER BY created_at DESC, id DESC) AS latest_rank'),
+        ).as('ranked_choices')).select('id', 'name').where('latest_rank', 1)
+      : db.from(source.clone().as('choices')).distinct('user_ref AS id', 'user_ref AS name').whereNotNull('user_ref').whereNot('user_ref', '');
+    const result = db.from(choices.as('facet_choices')).select('id', 'name');
+    if (search) {
+      const pattern = `%${search.toLowerCase().replace(/[!%_]/g, value => `!${value}`)}%`;
+      result.where(builder => builder
+        .whereRaw("LOWER(id) LIKE ? ESCAPE '!'", [pattern])
+        .orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [pattern]));
     }
+    return result.orderByRaw('LOWER(name) ASC').orderBy('id').limit(101);
+  }
+
+  private facetMetadata(
+    db: Knex,
+    postgres: boolean,
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+    facet: ExecutionFacet,
+  ) {
+    const facetQuery = {
+      ...query,
+      ...(facet === 'user' && query.scope === 'all' ? { userRef: undefined } : {}),
+    };
+    const { base, metadata, templateRef } = this.metadataQueries(db, postgres, facetQuery, callerRef, decision);
+    if (!query.allTime) base
+      .where('t.created_at', '>=', postgres ? query.from : query.from.slice(0, 19).replace('T', ' '))
+      .where('t.created_at', '<', postgres ? query.to : query.to.slice(0, 19).replace('T', ' '));
+    if (facet === 'user' && query.templateRef) base.whereRaw(`${templateRef} = ?`, [query.templateRef]);
+    return metadata(base);
+  }
+
+  private async guardSqliteRows(db: Knex, source: Knex.QueryBuilder, run: RunHistoryQuery) {
+    // Native synchronous SQLite statements cannot be interrupted by a timer.
+    // Check a bounded set of IDs before timing projections or facet windows.
+    const bounded = source.clone().clearSelect().select('t.id').limit(50_001);
+    const count = await run(db.from(bounded.as('bounded_history')).count({ total: '*' }).first());
+    if (Number(count?.total ?? 0) > 50_000)
+      throw new ServiceUnavailableError('SQLite history analytics cover up to 50000 runs per request. Narrow the date range or filters and try again.');
+  }
+
+  async searchFacets(
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+    facet: ExecutionFacet,
+    search: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutionFacetPage> {
+    this.validateAccess(query, decision);
+    const db = await this.getDatabase();
+    const postgres = this.isPostgres(db);
+    return this.workload.run(db, postgres, signal, async (transaction, run) => {
+      const source = this.facetMetadata(transaction, postgres, query, callerRef, decision, facet);
+      if (!postgres) await this.guardSqliteRows(transaction, source, run);
+      const choices = await run(this.facetChoices(transaction, source, facet, search));
+      return {
+        items: choices.slice(0, 100).map(row => ({ id: row.id as string, name: row.name as string })),
+        hasMore: choices.length > 100,
+      };
+    });
+  }
+
+  private async searchDatabase(
+    db: Knex,
+    postgres: boolean,
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+    limit: number,
+    run: RunHistoryQuery,
+    snapshot?: { id: string; ids: string[]; offset: number },
+  ): Promise<{ analytics: ExecutionAnalytics; snapshotIds?: string[] }> {
+    const { base, metadata, templateRef } = this.metadataQueries(db, postgres, query, callerRef, decision);
+
+    // A transaction has one connection; execute its statements sequentially.
     const cohort = base.clone();
     if (!query.allTime) {
       cohort
@@ -277,39 +351,60 @@ export class DatabaseHistoryStore {
       db.from(metadata(cohort).as('cohort')),
       query,
     );
-    const offset = query.offset ?? 0;
+    if (!postgres) {
+      await this.guardSqliteRows(db, cohort, run);
+    }
+    const templateSource = this.facetMetadata(db, postgres, query, callerRef, decision, 'template');
+    const userSource = this.facetMetadata(db, postgres, query, callerRef, decision, 'user');
+    if (!postgres) {
+      await this.guardSqliteRows(db, templateSource, run);
+      await this.guardSqliteRows(db, userSource, run);
+    }
+    const templateChoices = await run(this.facetChoices(db, templateSource, 'template'));
+    const userChoices = await run(this.facetChoices(db, userSource, 'user'));
+    const offset = snapshot?.offset ?? query.offset ?? 0;
     // Only elapsed sorting needs completion events for every matching execution.
     const sortableDetails =
       query.sortBy === 'durationMs'
         ? filterExecutionDetails(db.from(executions.clone().as('cohort')), query)
         : details.clone();
-    const pageIds = orderExecutionDetails(sortableDetails.select('id'), query)
+    const pageIds = orderExecutionDetails(sortableDetails.clone().select('id'), query)
       .limit(limit)
       .offset(offset);
-    // Search, status, COUNT, LIMIT and OFFSET execute in SQL; only one detail page leaves the DB.
-    const summaryRow = await metricsQuery(db, executions)
+    // Materialize completion timings once for the three ranking dimensions.
+    const metricSource = db.select('*').from('execution_cohort');
+    const summaryQuery = metricsQuery(db, metricSource)
       .select(db.raw('MIN(created_at) AS oldest_at'))
-      .first();
-    const templateRows = await metricsQuery(db, executions, 'template').limit(
-      this.maxHistoryRows + 1,
-    );
-    const userRows = await metricsQuery(db, executions, 'user').limit(
-      this.maxHistoryRows + 1,
-    );
-    const matchingCount = await details.clone().count({ total: '*' }).first();
-    const rawRows = await orderExecutionDetails(
-      db
-        .from(
-          executionProjection(
-            db,
-            metadata(base.clone().whereIn('t.id', pageIds)),
-            postgres,
-          ).as('page'),
-        )
-        .select('*'),
-      query,
-    );
-    const dailyRows = await db
+      .select(db.raw("'summary' AS kind, NULL AS id, NULL AS name, MAX(created_at) AS last_run"));
+    const groupedMetrics = (kind: 'template' | 'user') => metricsQuery(db, metricSource, kind)
+      .select(db.raw('MIN(created_at) AS oldest_at'))
+      .select(db.raw('? AS kind', [kind]))
+      .orderBy('total', 'desc').orderBy('id').limit(this.maxHistoryRows + 1);
+    const metricColumns = ['total', 'completed', 'failed', 'cancelled', 'active', 'users', 'templates', 'timed_completed', 'average_ms', 'p95_ms', 'oldest_at', 'kind', 'id', 'name', 'last_run'];
+    const metricRows = await run(db.withMaterialized('execution_cohort', executions)
+      .from(summaryQuery.as('summary')).select(metricColumns)
+      .unionAll([
+        db.from(groupedMetrics('template').as('templates')).select(metricColumns),
+        db.from(groupedMetrics('user').as('users')).select(metricColumns),
+      ]));
+    const summaryRow = metricRows.find(row => row.kind === 'summary')!;
+    const templateRows = metricRows.filter(row => row.kind === 'template');
+    const userRows = metricRows.filter(row => row.kind === 'user');
+    const matchingCount = await run(details.clone().count({ total: '*' }).first());
+    const matchingTotal = snapshot?.ids.length ?? Number(matchingCount?.total ?? 0);
+    let snapshotIds: string[] | undefined;
+    if (!snapshot && offset + limit < matchingTotal && matchingTotal <= MAX_SNAPSHOT_IDS) {
+      const ids = await run(orderExecutionDetails(sortableDetails.clone().select('id'), query).limit(MAX_SNAPSHOT_IDS));
+      snapshotIds = ids.map((row: { id: string }) => row.id);
+    }
+    const orderedIds = snapshot?.ids.slice(offset, offset + limit) ?? snapshotIds?.slice(offset, offset + limit);
+    const detailQuery = db.from(executionProjection(
+      db,
+      metadata(base.clone().whereIn('t.id', orderedIds ?? pageIds)),
+      postgres,
+    ).as('page')).select('*');
+    const rawRows = await run(orderedIds ? detailQuery : orderExecutionDetails(detailQuery, query));
+    const dailyRows = await run(db
       .from(metadata(cohort).as('cohort'))
       .where(
         'created_at',
@@ -339,14 +434,10 @@ export class DatabaseHistoryStore {
       .select(
         db.raw("SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"),
       )
-      .groupBy('date');
-    if (
-      templateRows.length > this.maxHistoryRows ||
-      userRows.length > this.maxHistoryRows
-    ) {
-      throw new InputError(
-        'Too many analytics groups. Narrow the template or user filters, or review templatePulse.maxHistoryRows.',
-      );
+      .groupBy('date'));
+    if (orderedIds) {
+      const positions = new Map(orderedIds.map((id, index) => [id, index]));
+      rawRows.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
     }
     const rows: Execution[] = rawRows.map(row => {
       const createdAt = isoDate(row.created_at);
@@ -364,7 +455,7 @@ export class DatabaseHistoryStore {
       };
     });
     const rollups = (results: typeof templateRows, kind: 'template' | 'user') =>
-      results
+      results.slice(0, this.maxHistoryRows)
         .map(row => {
           const userName =
             row.id === 'unknown' ? 'Unknown user' : (row.id as string);
@@ -397,40 +488,44 @@ export class DatabaseHistoryStore {
       });
     }
     const summary = mapMetrics(summaryRow);
-    const total = Number(matchingCount?.total ?? 0);
-    return {
+    return { snapshotIds, analytics: {
       scope: query.scope,
       items: rows,
       summary,
       templates: rollups(templateRows, 'template'),
       users: rollups(userRows, 'user'),
+      rollupsTruncated: {
+        templates: templateRows.length > this.maxHistoryRows,
+        users: userRows.length > this.maxHistoryRows,
+      },
       activity,
-      page: { offset, limit, total, hasMore: offset + limit < total },
+      page: { offset, limit, total: matchingTotal, hasMore: offset + limit < matchingTotal },
       facets: {
         templates: [
           ...new Map(
-            templateChoices.map(row => [
+            templateChoices.slice(0, 100).map(row => [
               row.id,
               { id: row.id as string, name: row.name as string },
             ]),
           ).values(),
         ].sort((a, b) => a.name.localeCompare(b.name)),
-        users: userChoices
-          .map(row => row.ref as string)
+        users: userChoices.slice(0, 100)
+          .map(row => row.id as string)
           .filter(Boolean)
           .sort(),
+        hasMore: { templates: templateChoices.length > 100, users: userChoices.length > 100 },
       },
       window: {
         historySource: 'database' as const,
         limit,
         scanned: summary.total,
-        sourceTotal: Number(counts?.total ?? 0),
+        sourceTotal: query.allTime && !query.templateRef ? summary.total : undefined,
         truncated: false,
         oldestAt: summaryRow.oldest_at
           ? isoDate(summaryRow.oldest_at)
           : undefined,
         generatedAt: new Date().toISOString(),
       },
-    };
+    } };
   }
 }

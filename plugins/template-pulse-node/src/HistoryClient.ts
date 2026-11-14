@@ -11,6 +11,8 @@ import {
 } from '@backstage/errors';
 import type {
   ExecutionAnalytics,
+  ExecutionFacet,
+  ExecutionFacetPage,
   ExecutionQuery,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 
@@ -20,7 +22,15 @@ export interface ExecutionHistory {
     query: ExecutionQuery,
     credentials: BackstageCredentials,
     limit: number,
+    signal?: AbortSignal,
   ): Promise<ExecutionAnalytics>;
+  searchFacets?(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    facet: ExecutionFacet,
+    search: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutionFacetPage>;
 }
 
 /** Calls the Scaffolder module on behalf of the current user. @public */
@@ -38,9 +48,46 @@ export class HistoryClient implements ExecutionHistory {
     query: ExecutionQuery,
     credentials: BackstageCredentials,
     limit: number,
+    signal?: AbortSignal,
   ): Promise<ExecutionAnalytics> {
+    return this.request(
+      'analytics',
+      query,
+      credentials,
+      new URLSearchParams({ limit: String(limit) }),
+      signal,
+    );
+  }
+
+  async searchFacets(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    facet: ExecutionFacet,
+    search: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutionFacetPage> {
+    return this.request(
+      'facets',
+      query,
+      credentials,
+      new URLSearchParams({ facet, facetQuery: search }),
+      signal,
+    );
+  }
+
+  private async request<T>(
+    endpoint: string,
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    params: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const requestSignal = AbortSignal.any([
+      AbortSignal.timeout(this.options.timeoutMs ?? 30_000),
+      ...(signal ? [signal] : []),
+    ]);
+    requestSignal.throwIfAborted();
     const baseUrl = await this.options.discovery.getBaseUrl('scaffolder');
-    const params = new URLSearchParams({ limit: String(limit) });
     for (const [key, value] of Object.entries(query))
       if (value !== undefined) params.set(key, String(value));
     const { token } = await this.options.auth.getPluginRequestToken({
@@ -48,10 +95,10 @@ export class HistoryClient implements ExecutionHistory {
       targetPluginId: 'scaffolder',
     });
     const response = await fetch(
-      `${baseUrl}/modules/template-pulse/analytics?${params}`,
+      `${baseUrl}/modules/template-pulse/${endpoint}?${params}`,
       {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(this.options.timeoutMs ?? 30_000),
+        signal: requestSignal,
       },
     );
     if (response.status === 404)
