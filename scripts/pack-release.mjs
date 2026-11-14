@@ -30,9 +30,9 @@ for (const { cwd, manifest } of packages) {
     cwd,
     stdio: 'inherit',
   });
-  const entries = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' })
+  const entries = execFileSync('tar', ['-tzf', filename], { cwd: output, encoding: 'utf8' })
     .trim().split(/\r?\n/).filter(entry => !entry.endsWith('/'));
-  const contents = entry => execFileSync('tar', ['-xOf', archive, `package/${entry}`], { encoding: 'utf8' });
+  const contents = entry => execFileSync('tar', ['-xOf', filename, `package/${entry}`], { cwd: output, encoding: 'utf8' });
   const packed = JSON.parse(contents('package.json'));
   assert.equal(packed.name, manifest.name);
   assert.equal(packed.version, manifest.version);
