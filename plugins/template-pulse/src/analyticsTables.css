@@ -142,7 +142,7 @@
   /* Extend into the cell padding so the value keeps its column alignment. */
   margin-right: -8px;
   padding: 2px 8px;
-  color: var(--bui-fg-info);
+  color: var(--bui-fg-announcement);
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -182,7 +182,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--bui-fg-success);
+  background: var(--bui-fg-positive);
 }
 
 .template-pulse-analytics-date {
@@ -214,7 +214,7 @@
   color: var(--bui-positive-fg-subdued);
   background: color-mix(
     in srgb,
-    var(--bui-fg-success) 10%,
+    var(--bui-fg-positive) 10%,
     var(--bui-bg-neutral-1)
   );
 }
@@ -223,17 +223,17 @@
   color: var(--bui-negative-fg-subdued);
   background: color-mix(
     in srgb,
-    var(--bui-fg-danger) 10%,
+    var(--bui-fg-negative) 10%,
     var(--bui-bg-neutral-1)
   );
 }
 
 .template-pulse-analytics-status[data-status='processing'],
 .template-pulse-analytics-status[data-status='open'] {
-  color: var(--bui-fg-info);
+  color: var(--bui-fg-announcement);
   background: color-mix(
     in srgb,
-    var(--bui-fg-info) 10%,
+    var(--bui-fg-announcement) 10%,
     var(--bui-bg-neutral-1)
   );
 }

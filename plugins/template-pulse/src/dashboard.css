@@ -165,7 +165,7 @@
   flex: 0 0 14px;
   box-sizing: border-box;
   border: 2px solid var(--bui-border-1);
-  border-top-color: var(--bui-fg-info);
+  border-top-color: var(--bui-fg-announcement);
   border-radius: 50%;
   animation: template-pulse-analytics-spin 0.8s linear infinite;
 }

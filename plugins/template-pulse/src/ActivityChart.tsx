@@ -159,8 +159,8 @@ export function ActivityChart({
                   {(['completed', 'failed', 'other'] as const).map(status => {
                     const height = (day[status] * 76) / max;
                     const color = {
-                      completed: 'success',
-                      failed: 'danger',
+                      completed: 'positive',
+                      failed: 'negative',
                       other: 'secondary',
                     }[status];
                     y -= height;
