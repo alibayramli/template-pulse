@@ -1,5 +1,6 @@
 // Merge these decisions into your existing permission policy.
 // Replace the group reference with the administrator group in your catalog.
+import type { UserInfoService } from '@backstage/backend-plugin-api';
 import { AuthorizeResult, isPermission } from '@backstage/plugin-permission-common';
 import type { PolicyQuery, PolicyQueryUser } from '@backstage/plugin-permission-node';
 import {
@@ -7,12 +8,19 @@ import {
   executionsReadAllPermission,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 
-export function executionHistoryDecision(request: PolicyQuery, user?: PolicyQueryUser) {
+export async function executionHistoryDecision(
+  request: PolicyQuery,
+  userInfo: UserInfoService,
+  user?: PolicyQueryUser,
+) {
   if (isPermission(request.permission, executionsReadPermission)) {
     return { result: user ? AuthorizeResult.ALLOW : AuthorizeResult.DENY };
   }
   if (isPermission(request.permission, executionsReadAllPermission)) {
-    const isAdmin = user?.info.ownershipEntityRefs.includes('group:default/platform-admins');
+    const ownershipEntityRefs = user
+      ? (await userInfo.getUserInfo(user.credentials)).ownershipEntityRefs
+      : [];
+    const isAdmin = ownershipEntityRefs.includes('group:default/platform-admins');
     return { result: isAdmin ? AuthorizeResult.ALLOW : AuthorizeResult.DENY };
   }
   return undefined; // Continue with the rest of the host policy.

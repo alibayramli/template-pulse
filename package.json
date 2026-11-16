@@ -30,8 +30,8 @@
     "verify:release": "yarn check:metadata && yarn lint && yarn test && yarn pack:release"
   },
   "devDependencies": {
-    "@backstage/cli": "0.36.6",
-    "@backstage/cli-defaults": "0.1.6",
+    "@backstage/cli": "^0.36.7",
+    "@backstage/cli-defaults": "^0.1.7",
     "@jest/environment-jsdom-abstract": "~30.2.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.15.0",
