@@ -62,7 +62,12 @@ permission:
   enabled: true
 ```
 
-Copy the [permission example](examples/permission-policy.ts) into your backend. In your registered policy's `handle` method, call `executionHistoryDecision(request, user)` and return its decision when defined, before your fallback. Replace `group:default/platform-admins` with your admin group.
+Use the [permission example](examples/permission-policy.ts) in your existing permission policy and replace the admin group with your own. In your policy's `handle` method, check its decision before your usual fallback:
+
+```ts
+const decision = await executionHistoryDecision(request, this.userInfo, user);
+if (decision) return decision;
+```
 
 - `template-pulse.read` lets users see their own runs.
 - `template-pulse.read-all` lets users see runs across the organization.
