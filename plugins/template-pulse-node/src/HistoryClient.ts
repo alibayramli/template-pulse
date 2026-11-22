@@ -24,6 +24,12 @@ export interface ExecutionHistory {
     limit: number,
     signal?: AbortSignal,
   ): Promise<ExecutionAnalytics>;
+  searchPage?(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>>;
   searchFacets?(
     query: ExecutionQuery,
     credentials: BackstageCredentials,
@@ -52,6 +58,21 @@ export class HistoryClient implements ExecutionHistory {
   ): Promise<ExecutionAnalytics> {
     return this.request(
       'analytics',
+      query,
+      credentials,
+      new URLSearchParams({ limit: String(limit) }),
+      signal,
+    );
+  }
+
+  async searchPage(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>> {
+    return this.request(
+      'analytics/page',
       query,
       credentials,
       new URLSearchParams({ limit: String(limit) }),

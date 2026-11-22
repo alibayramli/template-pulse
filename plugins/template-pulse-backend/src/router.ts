@@ -121,8 +121,13 @@ async function projectTask(
     task.status,
     task.lastHeartbeatAt,
   ]);
-  const cached = await withAbort(cache.get<{ durationMs: number }>(key), signal);
-  if (cached) return { ...execution, durationMs: cached.durationMs };
+  try {
+    const cached = await withAbort(cache.get<{ durationMs: number }>(key), signal);
+    if (cached) return { ...execution, durationMs: cached.durationMs };
+  } catch {
+    signal.throwIfAborted();
+    logger.debug(`Execution timing cache read failed for task ${task.id}`);
+  }
   if (timingBudget.remainingBytes <= 0) return execution;
 
   try {
@@ -236,6 +241,21 @@ export function createRouter(options: Options) {
     );
     res.setHeader('Cache-Control', 'no-store');
     res.json(result);
+  });
+
+  router.get('/analytics/page', async (req, res) => {
+    const query = parseExecutionQuery(req.query);
+    const credentials = await httpAuth.credentials(req, { allow: ['user'] });
+    await authorizeExecutionQuery({ query, credentials, permissions });
+    if (!query.cursor) throw new InputError('A history cursor is required.');
+    const searchPage = history?.searchPage?.bind(history);
+    if (!searchPage)
+      throw new InputError('Pagination requires the database history source.');
+    const page = await runAnalytics(req, res, signal =>
+      searchPage(query, credentials, maxTasks, signal),
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(page);
   });
 
   router.get('/analytics', async (req, res) => {

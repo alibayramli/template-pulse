@@ -167,6 +167,35 @@ export class DatabaseHistoryStore {
     return result.analytics;
   }
 
+  async searchPage(
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>> {
+    this.validateAccess(query, decision);
+    if (!query.cursor) throw new InputError('A history cursor is required.');
+    signal?.throwIfAborted();
+    const binding = snapshotBinding(query, callerRef, decision, limit);
+    const { id, ids, offset } = await this.snapshots.read(query.cursor, binding);
+    const db = await this.getDatabase();
+    const postgres = this.isPostgres(db);
+    const nextOffset = offset + limit;
+    const items = await this.workload.run(db, postgres, signal, (transaction, run) => {
+      const { base, metadata } = this.metadataQueries(transaction, postgres, query, callerRef, decision);
+      return this.readPageItems(transaction, postgres, metadata(base), ids.slice(offset, nextOffset), query, run);
+    });
+    const page: ExecutionAnalytics['page'] = {
+      offset,
+      limit,
+      total: ids.length,
+      hasMore: nextOffset < ids.length,
+    };
+    if (page.hasMore) page.nextCursor = `${id}.${nextOffset}`;
+    return { items, page };
+  }
+
   private validateAccess(query: HistoryQuery, decision: QueryPermissionResponse) {
     if (query.teamRef && !query.teamMembers)
       throw new InputError(
@@ -317,6 +346,35 @@ export class DatabaseHistoryStore {
     });
   }
 
+  private async readPageItems(
+    db: Knex,
+    postgres: boolean,
+    metadata: Knex.QueryBuilder,
+    ids: string[] | Knex.QueryBuilder,
+    query: HistoryQuery,
+    run: RunHistoryQuery,
+  ): Promise<Execution[]> {
+    const executions = executionProjection(db, metadata.whereIn('t.id', ids), postgres);
+    const details = db.from(executions.as('page')).select('*');
+    const rows = await run(Array.isArray(ids) ? details : orderExecutionDetails(details, query));
+    if (Array.isArray(ids)) {
+      const positions = new Map(ids.map((id, index) => [id, index]));
+      rows.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+    }
+    return rows.map(row => ({
+      id: row.id,
+      status: row.status,
+      templateRef: row.template_ref,
+      templateName: row.template_name,
+      userRef: row.user_ref ?? undefined,
+      createdAt: isoDate(row.created_at),
+      durationMs:
+        row.duration_ms === null || row.duration_ms === undefined
+          ? undefined
+          : Number(row.duration_ms),
+    }));
+  }
+
   private async searchDatabase(
     db: Knex,
     postgres: boolean,
@@ -398,12 +456,7 @@ export class DatabaseHistoryStore {
       snapshotIds = ids.map((row: { id: string }) => row.id);
     }
     const orderedIds = snapshot?.ids.slice(offset, offset + limit) ?? snapshotIds?.slice(offset, offset + limit);
-    const detailQuery = db.from(executionProjection(
-      db,
-      metadata(base.clone().whereIn('t.id', orderedIds ?? pageIds)),
-      postgres,
-    ).as('page')).select('*');
-    const rawRows = await run(orderedIds ? detailQuery : orderExecutionDetails(detailQuery, query));
+    const rows = await this.readPageItems(db, postgres, metadata(base), orderedIds ?? pageIds, query, run);
     const dailyRows = await run(db
       .from(metadata(cohort).as('cohort'))
       .where(
@@ -435,25 +488,6 @@ export class DatabaseHistoryStore {
         db.raw("SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"),
       )
       .groupBy('date'));
-    if (orderedIds) {
-      const positions = new Map(orderedIds.map((id, index) => [id, index]));
-      rawRows.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
-    }
-    const rows: Execution[] = rawRows.map(row => {
-      const createdAt = isoDate(row.created_at);
-      return {
-        id: row.id,
-        status: row.status,
-        templateRef: row.template_ref,
-        templateName: row.template_name,
-        userRef: row.user_ref ?? undefined,
-        createdAt,
-        durationMs:
-          row.duration_ms === null || row.duration_ms === undefined
-            ? undefined
-            : Number(row.duration_ms),
-      };
-    });
     const rollups = (results: typeof templateRows, kind: 'template' | 'user') =>
       results.slice(0, this.maxHistoryRows)
         .map(row => {

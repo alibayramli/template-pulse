@@ -223,15 +223,16 @@ export function useExecutionAnalytics(
     setLoadingMore(true);
     setError(undefined);
     try {
-      const data = await api.getAnalytics(
-        { ...query, cursor: result.page.nextCursor },
-        controller.signal,
-      );
+      const pageQuery = { ...query, cursor: result.page.nextCursor };
+      const data = api.getExecutionPage
+        ? await api.getExecutionPage(pageQuery, controller.signal)
+        : await api.getAnalytics(pageQuery, controller.signal);
       if (!controller.signal.aborted)
         setResult(previous =>
           previous
             ? {
-                ...data,
+                ...previous,
+                page: data.page,
                 items: [
                   ...new Map(
                     [...previous.items, ...data.items].map(item => [
