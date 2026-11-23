@@ -22,6 +22,10 @@ export interface ExecutionsApi {
     query: ExecutionQuery,
     signal?: AbortSignal,
   ): Promise<ExecutionAnalytics>;
+  getExecutionPage?(
+    query: ExecutionQuery,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>>;
   getFacets?(
     query: ExecutionQuery,
     facet: ExecutionFacet,
@@ -41,6 +45,14 @@ export const executionsApiRef = createApiRef<ExecutionsApi>().with({
   id: 'plugin.template-pulse.api',
 });
 
+function queryParams(query: ExecutionQuery, initial?: Record<string, string>) {
+  const params = new URLSearchParams(initial);
+  for (const [key, value] of Object.entries(query))
+    if (value !== undefined && value !== '' && value !== false)
+      params.set(key, String(value));
+  return params;
+}
+
 /** @public */
 export class ExecutionsClient implements ExecutionsApi {
   constructor(
@@ -55,11 +67,17 @@ export class ExecutionsClient implements ExecutionsApi {
   }
 
   getAnalytics(query: ExecutionQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(query))
-      if (value !== undefined && value !== '' && value !== false)
-        params.set(key, String(value));
-    return this.get<ExecutionAnalytics>(`/analytics?${params}`, signal);
+    return this.get<ExecutionAnalytics>(
+      `/analytics?${queryParams(query)}`,
+      signal,
+    );
+  }
+
+  getExecutionPage(query: ExecutionQuery, signal?: AbortSignal) {
+    return this.get<Pick<ExecutionAnalytics, 'items' | 'page'>>(
+      `/analytics/page?${queryParams(query)}`,
+      signal,
+    );
   }
 
   getFacets(
@@ -68,10 +86,7 @@ export class ExecutionsClient implements ExecutionsApi {
     search: string,
     signal?: AbortSignal,
   ) {
-    const params = new URLSearchParams({ facet, facetQuery: search });
-    for (const [key, value] of Object.entries(query))
-      if (value !== undefined && value !== '' && value !== false)
-        params.set(key, String(value));
+    const params = queryParams(query, { facet, facetQuery: search });
     return this.get<ExecutionFacetPage>(`/facets?${params}`, signal);
   }
 

@@ -23,8 +23,8 @@ export function createRouter(options: {
 }) {
   const { httpAuth, permissions, historyStore } = options;
   const router = Router();
-  const handle = (facets: boolean) => async (req: Request, res: Response) => {
-    const facetQuery = facets ? parseExecutionFacetQuery(req.query) : undefined;
+  const handle = (view: 'analytics' | 'page' | 'facets') => async (req: Request, res: Response) => {
+    const facetQuery = view === 'facets' ? parseExecutionFacetQuery(req.query) : undefined;
     const query = facetQuery?.query ?? parseExecutionQuery(req.query);
     const limit = req.query.limit ?? '200';
     if (
@@ -58,9 +58,10 @@ export function createRouter(options: {
         : undefined;
       const historyQuery = teamMembers ? { ...query, teamMembers } : query;
       const caller = credentials.principal.userEntityRef;
+      const method = view === 'page' ? 'searchPage' : 'search';
       const result = facetQuery
         ? await historyStore.searchFacets(historyQuery, caller, decision, facetQuery.facet, facetQuery.search, controller.signal)
-        : await historyStore.search(historyQuery, caller, decision, Number(limit), controller.signal);
+        : await historyStore[method](historyQuery, caller, decision, Number(limit), controller.signal);
       controller.signal.throwIfAborted();
       res.setHeader('Cache-Control', 'no-store');
       res.json(result);
@@ -70,7 +71,8 @@ export function createRouter(options: {
       res.removeListener('close', onClose);
     }
   };
-  router.get('/modules/template-pulse/analytics', handle(false));
-  router.get('/modules/template-pulse/facets', handle(true));
+  router.get('/modules/template-pulse/analytics', handle('analytics'));
+  router.get('/modules/template-pulse/analytics/page', handle('page'));
+  router.get('/modules/template-pulse/facets', handle('facets'));
   return router;
 }

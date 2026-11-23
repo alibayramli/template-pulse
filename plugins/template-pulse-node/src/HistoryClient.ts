@@ -16,7 +16,7 @@ import type {
   ExecutionQuery,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 
-/** The authenticated HTTP interface to the Scaffolder history module. @public */
+/** Read execution analytics on behalf of the current caller. @public */
 export interface ExecutionHistory {
   search(
     query: ExecutionQuery,
@@ -24,6 +24,12 @@ export interface ExecutionHistory {
     limit: number,
     signal?: AbortSignal,
   ): Promise<ExecutionAnalytics>;
+  searchPage?(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>>;
   searchFacets?(
     query: ExecutionQuery,
     credentials: BackstageCredentials,
@@ -52,6 +58,21 @@ export class HistoryClient implements ExecutionHistory {
   ): Promise<ExecutionAnalytics> {
     return this.request(
       'analytics',
+      query,
+      credentials,
+      new URLSearchParams({ limit: String(limit) }),
+      signal,
+    );
+  }
+
+  async searchPage(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>> {
+    return this.request(
+      'analytics/page',
       query,
       credentials,
       new URLSearchParams({ limit: String(limit) }),

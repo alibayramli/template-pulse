@@ -1,8 +1,17 @@
 import type { Knex } from 'knex';
 import type {
+  DailyActivity,
   ExecutionMetrics,
   ExecutionQuery,
 } from '@abayramli/backstage-plugin-template-pulse-common';
+import type { RunHistoryQuery } from './historyWorkload';
+
+export function isoDate(value: Date | string) {
+  if (value instanceof Date) return value.toISOString();
+  return new Date(
+    value.includes('T') ? value : `${value.replace(' ', 'T')}Z`,
+  ).toISOString();
+}
 
 /** Order public metadata before LIMIT/OFFSET, with missing values last in either direction. */
 export function orderExecutionDetails<T extends Knex.QueryBuilder>(
@@ -174,4 +183,88 @@ export function mapMetrics(row: Record<string, unknown>): ExecutionMetrics {
         ? undefined
         : Number(row.p95_ms),
   };
+}
+
+export async function readSummaryAndRollups(
+  db: Knex,
+  executions: Knex.QueryBuilder,
+  maxHistoryRows: number,
+  run: RunHistoryQuery,
+) {
+  // Materialize completion timings once for the three ranking dimensions.
+  const metricSource = db.select('*').from('execution_cohort');
+  const summaryQuery = metricsQuery(db, metricSource)
+    .select(db.raw('MIN(created_at) AS oldest_at'))
+    .select(db.raw("'summary' AS kind, NULL AS id, NULL AS name, MAX(created_at) AS last_run"));
+  const groupedMetrics = (kind: 'template' | 'user') => metricsQuery(db, metricSource, kind)
+    .select(db.raw('MIN(created_at) AS oldest_at'))
+    .select(db.raw('? AS kind', [kind]))
+    .orderBy('total', 'desc').orderBy('id').limit(maxHistoryRows + 1);
+  const metricColumns = [
+    'total', 'completed', 'failed', 'cancelled', 'active', 'users', 'templates',
+    'timed_completed', 'average_ms', 'p95_ms', 'oldest_at', 'kind', 'id', 'name', 'last_run',
+  ];
+  const metricRows = await run(db.withMaterialized('execution_cohort', executions)
+    .from(summaryQuery.as('summary')).select(metricColumns)
+    .unionAll([
+      db.from(groupedMetrics('template').as('templates')).select(metricColumns),
+      db.from(groupedMetrics('user').as('users')).select(metricColumns),
+    ]));
+  const summaryRow = metricRows.find(row => row.kind === 'summary')!;
+  const templateRows = metricRows.filter(row => row.kind === 'template');
+  const userRows = metricRows.filter(row => row.kind === 'user');
+  const rollups = (results: typeof templateRows, kind: 'template' | 'user') =>
+    results.slice(0, maxHistoryRows)
+      .map(row => {
+        const userName = row.id === 'unknown' ? 'Unknown user' : (row.id as string);
+        return {
+          id: row.id as string,
+          name: kind === 'template' ? (row.name as string) : userName,
+          lastRun: isoDate(row.last_run),
+          ...mapMetrics(row),
+        };
+      })
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  return {
+    summary: mapMetrics(summaryRow),
+    templates: rollups(templateRows, 'template'),
+    users: rollups(userRows, 'user'),
+    rollupsTruncated: {
+      templates: templateRows.length > maxHistoryRows,
+      users: userRows.length > maxHistoryRows,
+    },
+    oldestAt: summaryRow.oldest_at ? isoDate(summaryRow.oldest_at) : undefined,
+  };
+}
+
+export async function readDailyActivity(
+  db: Knex,
+  postgres: boolean,
+  cohort: Knex.QueryBuilder,
+  range: Pick<ExecutionQuery, 'from' | 'to'>,
+  run: RunHistoryQuery,
+): Promise<DailyActivity[]> {
+  const date = postgres
+    ? "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
+    : 'substr(created_at, 1, 10)';
+  const dailyRows = await run(db.from(cohort.as('cohort'))
+    .where('created_at', '>=', postgres ? range.from : range.from.slice(0, 19).replace('T', ' '))
+    .where('created_at', '<', postgres ? range.to : range.to.slice(0, 19).replace('T', ' '))
+    .select(db.raw(`${date} AS date`))
+    .select(db.raw('COUNT(*) AS total'))
+    .select(db.raw("SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed"))
+    .select(db.raw("SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"))
+    .groupBy('date'));
+  const daily = new Map(dailyRows.map(row => [row.date, row]));
+  const activity: DailyActivity[] = [];
+  const end = Date.parse(range.to);
+  for (let day = Date.parse(range.from); day < end; day += 86_400_000) {
+    const dayKey = new Date(day).toISOString().slice(0, 10);
+    const row = daily.get(dayKey);
+    const total = Number(row?.total ?? 0);
+    const completed = Number(row?.completed ?? 0);
+    const failed = Number(row?.failed ?? 0);
+    activity.push({ date: dayKey, total, completed, failed, other: total - completed - failed });
+  }
+  return activity;
 }

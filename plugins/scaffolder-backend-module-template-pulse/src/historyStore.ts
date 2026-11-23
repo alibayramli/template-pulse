@@ -8,7 +8,6 @@ import {
   type QueryPermissionResponse,
 } from '@backstage/plugin-permission-common';
 import type {
-  DailyActivity,
   Execution,
   ExecutionAnalytics,
   ExecutionFacet,
@@ -18,9 +17,10 @@ import type {
 import {
   executionProjection,
   filterExecutionDetails,
-  mapMetrics,
-  metricsQuery,
+  isoDate,
   orderExecutionDetails,
+  readDailyActivity,
+  readSummaryAndRollups,
 } from './historySql';
 import { HistoryWorkload, type RunHistoryQuery } from './historyWorkload';
 import { HistorySnapshots, MAX_SNAPSHOT_IDS, snapshotBinding } from './historySnapshots';
@@ -59,13 +59,6 @@ function applyConditions(
     }
     query.whereIn('t.created_by', owners);
   }
-}
-
-function isoDate(value: Date | string) {
-  if (value instanceof Date) return value.toISOString();
-  return new Date(
-    value.includes('T') ? value : `${value.replace(' ', 'T')}Z`,
-  ).toISOString();
 }
 
 /** Read-only adapter for the standard Scaffolder SQL task store. */
@@ -165,6 +158,35 @@ export class DatabaseHistoryStore {
       else result.analytics.page.continuationUnavailable = true;
     }
     return result.analytics;
+  }
+
+  async searchPage(
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>> {
+    this.validateAccess(query, decision);
+    if (!query.cursor) throw new InputError('A history cursor is required.');
+    signal?.throwIfAborted();
+    const binding = snapshotBinding(query, callerRef, decision, limit);
+    const { id, ids, offset } = await this.snapshots.read(query.cursor, binding);
+    const db = await this.getDatabase();
+    const postgres = this.isPostgres(db);
+    const nextOffset = offset + limit;
+    const items = await this.workload.run(db, postgres, signal, (transaction, run) => {
+      const { base, metadata } = this.metadataQueries(transaction, postgres, query, callerRef, decision);
+      return this.readPageItems(transaction, postgres, metadata(base), ids.slice(offset, nextOffset), query, run);
+    });
+    const page: ExecutionAnalytics['page'] = {
+      offset,
+      limit,
+      total: ids.length,
+      hasMore: nextOffset < ids.length,
+    };
+    if (page.hasMore) page.nextCursor = `${id}.${nextOffset}`;
+    return { items, page };
   }
 
   private validateAccess(query: HistoryQuery, decision: QueryPermissionResponse) {
@@ -317,6 +339,35 @@ export class DatabaseHistoryStore {
     });
   }
 
+  private async readPageItems(
+    db: Knex,
+    postgres: boolean,
+    metadata: Knex.QueryBuilder,
+    ids: string[] | Knex.QueryBuilder,
+    query: HistoryQuery,
+    run: RunHistoryQuery,
+  ): Promise<Execution[]> {
+    const executions = executionProjection(db, metadata.whereIn('t.id', ids), postgres);
+    const details = db.from(executions.as('page')).select('*');
+    const rows = await run(Array.isArray(ids) ? details : orderExecutionDetails(details, query));
+    if (Array.isArray(ids)) {
+      const positions = new Map(ids.map((id, index) => [id, index]));
+      rows.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+    }
+    return rows.map(row => ({
+      id: row.id,
+      status: row.status,
+      templateRef: row.template_ref,
+      templateName: row.template_name,
+      userRef: row.user_ref ?? undefined,
+      createdAt: isoDate(row.created_at),
+      durationMs:
+        row.duration_ms === null || row.duration_ms === undefined
+          ? undefined
+          : Number(row.duration_ms),
+    }));
+  }
+
   private async searchDatabase(
     db: Knex,
     postgres: boolean,
@@ -371,25 +422,9 @@ export class DatabaseHistoryStore {
     const pageIds = orderExecutionDetails(sortableDetails.clone().select('id'), query)
       .limit(limit)
       .offset(offset);
-    // Materialize completion timings once for the three ranking dimensions.
-    const metricSource = db.select('*').from('execution_cohort');
-    const summaryQuery = metricsQuery(db, metricSource)
-      .select(db.raw('MIN(created_at) AS oldest_at'))
-      .select(db.raw("'summary' AS kind, NULL AS id, NULL AS name, MAX(created_at) AS last_run"));
-    const groupedMetrics = (kind: 'template' | 'user') => metricsQuery(db, metricSource, kind)
-      .select(db.raw('MIN(created_at) AS oldest_at'))
-      .select(db.raw('? AS kind', [kind]))
-      .orderBy('total', 'desc').orderBy('id').limit(this.maxHistoryRows + 1);
-    const metricColumns = ['total', 'completed', 'failed', 'cancelled', 'active', 'users', 'templates', 'timed_completed', 'average_ms', 'p95_ms', 'oldest_at', 'kind', 'id', 'name', 'last_run'];
-    const metricRows = await run(db.withMaterialized('execution_cohort', executions)
-      .from(summaryQuery.as('summary')).select(metricColumns)
-      .unionAll([
-        db.from(groupedMetrics('template').as('templates')).select(metricColumns),
-        db.from(groupedMetrics('user').as('users')).select(metricColumns),
-      ]));
-    const summaryRow = metricRows.find(row => row.kind === 'summary')!;
-    const templateRows = metricRows.filter(row => row.kind === 'template');
-    const userRows = metricRows.filter(row => row.kind === 'user');
+    const { summary, templates, users, rollupsTruncated, oldestAt } = await readSummaryAndRollups(
+      db, executions, this.maxHistoryRows, run,
+    );
     const matchingCount = await run(details.clone().count({ total: '*' }).first());
     const matchingTotal = snapshot?.ids.length ?? Number(matchingCount?.total ?? 0);
     let snapshotIds: string[] | undefined;
@@ -398,106 +433,15 @@ export class DatabaseHistoryStore {
       snapshotIds = ids.map((row: { id: string }) => row.id);
     }
     const orderedIds = snapshot?.ids.slice(offset, offset + limit) ?? snapshotIds?.slice(offset, offset + limit);
-    const detailQuery = db.from(executionProjection(
-      db,
-      metadata(base.clone().whereIn('t.id', orderedIds ?? pageIds)),
-      postgres,
-    ).as('page')).select('*');
-    const rawRows = await run(orderedIds ? detailQuery : orderExecutionDetails(detailQuery, query));
-    const dailyRows = await run(db
-      .from(metadata(cohort).as('cohort'))
-      .where(
-        'created_at',
-        '>=',
-        postgres ? query.from : query.from.slice(0, 19).replace('T', ' '),
-      )
-      .where(
-        'created_at',
-        '<',
-        postgres ? query.to : query.to.slice(0, 19).replace('T', ' '),
-      )
-      .select(
-        db.raw(
-          `${
-            postgres
-              ? "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
-              : 'substr(created_at, 1, 10)'
-          } AS date`,
-        ),
-      )
-      .select(db.raw('COUNT(*) AS total'))
-      .select(
-        db.raw(
-          "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed",
-        ),
-      )
-      .select(
-        db.raw("SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"),
-      )
-      .groupBy('date'));
-    if (orderedIds) {
-      const positions = new Map(orderedIds.map((id, index) => [id, index]));
-      rawRows.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
-    }
-    const rows: Execution[] = rawRows.map(row => {
-      const createdAt = isoDate(row.created_at);
-      return {
-        id: row.id,
-        status: row.status,
-        templateRef: row.template_ref,
-        templateName: row.template_name,
-        userRef: row.user_ref ?? undefined,
-        createdAt,
-        durationMs:
-          row.duration_ms === null || row.duration_ms === undefined
-            ? undefined
-            : Number(row.duration_ms),
-      };
-    });
-    const rollups = (results: typeof templateRows, kind: 'template' | 'user') =>
-      results.slice(0, this.maxHistoryRows)
-        .map(row => {
-          const userName =
-            row.id === 'unknown' ? 'Unknown user' : (row.id as string);
-          return {
-            id: row.id as string,
-            name: kind === 'template' ? (row.name as string) : userName,
-            lastRun: isoDate(row.last_run),
-            ...mapMetrics(row),
-          };
-        })
-        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-    const daily = new Map(dailyRows.map(row => [row.date, row]));
-    const activity: DailyActivity[] = [];
-    for (
-      let day = Date.parse(query.from);
-      day < Date.parse(query.to);
-      day += 86_400_000
-    ) {
-      const date = new Date(day).toISOString().slice(0, 10);
-      const row = daily.get(date);
-      const total = Number(row?.total ?? 0);
-      const completed = Number(row?.completed ?? 0);
-      const failed = Number(row?.failed ?? 0);
-      activity.push({
-        date,
-        total,
-        completed,
-        failed,
-        other: total - completed - failed,
-      });
-    }
-    const summary = mapMetrics(summaryRow);
+    const rows = await this.readPageItems(db, postgres, metadata(base), orderedIds ?? pageIds, query, run);
+    const activity = await readDailyActivity(db, postgres, metadata(cohort), query, run);
     return { snapshotIds, analytics: {
       scope: query.scope,
       items: rows,
       summary,
-      templates: rollups(templateRows, 'template'),
-      users: rollups(userRows, 'user'),
-      rollupsTruncated: {
-        templates: templateRows.length > this.maxHistoryRows,
-        users: userRows.length > this.maxHistoryRows,
-      },
+      templates,
+      users,
+      rollupsTruncated,
       activity,
       page: { offset, limit, total: matchingTotal, hasMore: offset + limit < matchingTotal },
       facets: {
@@ -521,9 +465,7 @@ export class DatabaseHistoryStore {
         scanned: summary.total,
         sourceTotal: query.allTime && !query.templateRef ? summary.total : undefined,
         truncated: false,
-        oldestAt: summaryRow.oldest_at
-          ? isoDate(summaryRow.oldest_at)
-          : undefined,
+        oldestAt,
         generatedAt: new Date().toISOString(),
       },
     } };
