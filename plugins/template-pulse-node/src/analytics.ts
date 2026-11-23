@@ -86,9 +86,19 @@ export function aggregateExecutions(
     else if (row.status === 'failed') day.failed += 1;
     else day.other += 1;
   }
-  // Search and status narrow the detail list, never the health/adoption metrics.
+  return {
+    ...paginateExecutions(filterExecutions(rows, query), query, limit),
+    summary: summarize(rows),
+    templates: group('template'),
+    users: group('user'),
+    activity: [...activity.values()],
+  };
+}
+
+/** Match run-list filters against public execution metadata. @public */
+export function filterExecutions(rows: Execution[], query: ExecutionQuery) {
   const terms = query.query?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
-  const matching = rows.filter(
+  return rows.filter(
     row =>
       (!query.status || row.status === query.status) &&
       terms.every(term =>
@@ -97,9 +107,17 @@ export function aggregateExecutions(
         ),
       ),
   );
+}
+
+/** Sort and page an already filtered run list. @public */
+export function paginateExecutions(
+  matching: Execution[],
+  query: ExecutionQuery,
+  limit: number,
+) {
   const field = query.sortBy ?? 'createdAt';
   const direction = query.sortDirection === 'ascending' ? 1 : -1;
-  matching.sort((a, b) => {
+  const ordered = [...matching].sort((a, b) => {
     const left = a[field];
     const right = b[field];
     if (left === undefined)
@@ -113,16 +131,12 @@ export function aggregateExecutions(
   });
   const offset = query.offset ?? 0;
   return {
-    items: matching.slice(offset, offset + limit),
+    items: ordered.slice(offset, offset + limit),
     page: {
       offset,
       limit,
       total: matching.length,
       hasMore: offset + limit < matching.length,
     },
-    summary: summarize(rows),
-    templates: group('template'),
-    users: group('user'),
-    activity: [...activity.values()],
   };
 }

@@ -22,6 +22,10 @@ export interface ExecutionsApi {
     query: ExecutionQuery,
     signal?: AbortSignal,
   ): Promise<ExecutionAnalytics>;
+  getExecutions?(
+    query: ExecutionQuery,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>>;
   getExecutionPage?(
     query: ExecutionQuery,
     signal?: AbortSignal,
@@ -69,6 +73,13 @@ export class ExecutionsClient implements ExecutionsApi {
   getAnalytics(query: ExecutionQuery, signal?: AbortSignal) {
     return this.get<ExecutionAnalytics>(
       `/analytics?${queryParams(query)}`,
+      signal,
+    );
+  }
+
+  getExecutions(query: ExecutionQuery, signal?: AbortSignal) {
+    return this.get<Pick<ExecutionAnalytics, 'items' | 'page'>>(
+      `/executions?${queryParams(query)}`,
       signal,
     );
   }

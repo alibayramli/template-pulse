@@ -1,4 +1,8 @@
-export { aggregateExecutions } from './analytics';
+export {
+  aggregateExecutions,
+  filterExecutions,
+  paginateExecutions,
+} from './analytics';
 export {
   parseExecutionQuery,
   parseExecutionFacetQuery,
