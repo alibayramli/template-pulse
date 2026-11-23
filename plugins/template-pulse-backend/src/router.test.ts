@@ -3,6 +3,7 @@ import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { AuthorizeResult } from '@backstage/plugin-permission-common';
 import { createRouter } from './router';
+import { ServiceHistory } from './ServiceHistory';
 
 const credentials = {
   principal: { type: 'user', userEntityRef: 'user:default/alice' },
@@ -35,16 +36,19 @@ beforeEach(async () => {
       credentials: getCredentials,
     },
     permissions: { authorize },
+    maxTasks: 200,
+    history: { search },
+  } as unknown as Parameters<typeof createRouter>[0];
+  const serviceHistory = new ServiceHistory({
     scaffolder: { listTasks, getLogs },
+    teams: { getMembers: jest.fn() },
     cache: {
       get: jest.fn().mockResolvedValue(undefined),
       set: jest.fn().mockResolvedValue(undefined),
     },
     logger: { debug: jest.fn() },
-    maxTasks: 200,
-    history: { search },
-  } as unknown as Parameters<typeof createRouter>[0];
-  app.use('/service', createRouter({ ...options, history: undefined }));
+  });
+  app.use('/service', createRouter({ ...options, history: serviceHistory }));
   app.use(createRouter(options));
   app.use(
     (

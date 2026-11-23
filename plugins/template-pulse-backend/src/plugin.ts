@@ -9,6 +9,7 @@ import {
 } from '@abayramli/backstage-plugin-template-pulse-node';
 import { createRouter } from './router';
 import { ScaffolderTasksClient } from './ScaffolderTasksClient';
+import { ServiceHistory } from './ServiceHistory';
 
 /** Permission-aware template analytics for the new backend system. @public */
 export const templatePulsePlugin = createBackendPlugin({
@@ -32,7 +33,10 @@ export const templatePulsePlugin = createBackendPlugin({
         config,
         auth,
         discovery,
-        ...services
+        httpAuth,
+        permissions,
+        cache,
+        logger,
       }) {
         // A disabled permission backend grants basic permissions automatically.
         // Require it explicitly so the administrator scope cannot become public.
@@ -58,12 +62,13 @@ export const templatePulsePlugin = createBackendPlugin({
         const history =
           historySource === 'database'
             ? new HistoryClient({ auth, discovery })
-            : undefined;
-        const teams = new TeamMembersClient({ auth, discovery });
-        const scaffolder = new ScaffolderTasksClient({ auth, discovery });
-        httpRouter.use(
-          createRouter({ ...services, scaffolder, maxTasks, history, teams }),
-        );
+            : new ServiceHistory({
+                scaffolder: new ScaffolderTasksClient({ auth, discovery }),
+                teams: new TeamMembersClient({ auth, discovery }),
+                cache,
+                logger,
+              });
+        httpRouter.use(createRouter({ httpAuth, permissions, maxTasks, history }));
       },
     });
   },

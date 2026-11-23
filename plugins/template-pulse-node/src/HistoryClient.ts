@@ -16,7 +16,7 @@ import type {
   ExecutionQuery,
 } from '@abayramli/backstage-plugin-template-pulse-common';
 
-/** The authenticated HTTP interface to the Scaffolder history module. @public */
+/** Read execution analytics on behalf of the current caller. @public */
 export interface ExecutionHistory {
   search(
     query: ExecutionQuery,

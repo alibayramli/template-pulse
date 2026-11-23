@@ -8,7 +8,6 @@ import {
   type QueryPermissionResponse,
 } from '@backstage/plugin-permission-common';
 import type {
-  DailyActivity,
   Execution,
   ExecutionAnalytics,
   ExecutionFacet,
@@ -18,9 +17,10 @@ import type {
 import {
   executionProjection,
   filterExecutionDetails,
-  mapMetrics,
-  metricsQuery,
+  isoDate,
   orderExecutionDetails,
+  readDailyActivity,
+  readSummaryAndRollups,
 } from './historySql';
 import { HistoryWorkload, type RunHistoryQuery } from './historyWorkload';
 import { HistorySnapshots, MAX_SNAPSHOT_IDS, snapshotBinding } from './historySnapshots';
@@ -59,13 +59,6 @@ function applyConditions(
     }
     query.whereIn('t.created_by', owners);
   }
-}
-
-function isoDate(value: Date | string) {
-  if (value instanceof Date) return value.toISOString();
-  return new Date(
-    value.includes('T') ? value : `${value.replace(' ', 'T')}Z`,
-  ).toISOString();
 }
 
 /** Read-only adapter for the standard Scaffolder SQL task store. */
@@ -429,25 +422,9 @@ export class DatabaseHistoryStore {
     const pageIds = orderExecutionDetails(sortableDetails.clone().select('id'), query)
       .limit(limit)
       .offset(offset);
-    // Materialize completion timings once for the three ranking dimensions.
-    const metricSource = db.select('*').from('execution_cohort');
-    const summaryQuery = metricsQuery(db, metricSource)
-      .select(db.raw('MIN(created_at) AS oldest_at'))
-      .select(db.raw("'summary' AS kind, NULL AS id, NULL AS name, MAX(created_at) AS last_run"));
-    const groupedMetrics = (kind: 'template' | 'user') => metricsQuery(db, metricSource, kind)
-      .select(db.raw('MIN(created_at) AS oldest_at'))
-      .select(db.raw('? AS kind', [kind]))
-      .orderBy('total', 'desc').orderBy('id').limit(this.maxHistoryRows + 1);
-    const metricColumns = ['total', 'completed', 'failed', 'cancelled', 'active', 'users', 'templates', 'timed_completed', 'average_ms', 'p95_ms', 'oldest_at', 'kind', 'id', 'name', 'last_run'];
-    const metricRows = await run(db.withMaterialized('execution_cohort', executions)
-      .from(summaryQuery.as('summary')).select(metricColumns)
-      .unionAll([
-        db.from(groupedMetrics('template').as('templates')).select(metricColumns),
-        db.from(groupedMetrics('user').as('users')).select(metricColumns),
-      ]));
-    const summaryRow = metricRows.find(row => row.kind === 'summary')!;
-    const templateRows = metricRows.filter(row => row.kind === 'template');
-    const userRows = metricRows.filter(row => row.kind === 'user');
+    const { summary, templates, users, rollupsTruncated, oldestAt } = await readSummaryAndRollups(
+      db, executions, this.maxHistoryRows, run,
+    );
     const matchingCount = await run(details.clone().count({ total: '*' }).first());
     const matchingTotal = snapshot?.ids.length ?? Number(matchingCount?.total ?? 0);
     let snapshotIds: string[] | undefined;
@@ -457,81 +434,14 @@ export class DatabaseHistoryStore {
     }
     const orderedIds = snapshot?.ids.slice(offset, offset + limit) ?? snapshotIds?.slice(offset, offset + limit);
     const rows = await this.readPageItems(db, postgres, metadata(base), orderedIds ?? pageIds, query, run);
-    const dailyRows = await run(db
-      .from(metadata(cohort).as('cohort'))
-      .where(
-        'created_at',
-        '>=',
-        postgres ? query.from : query.from.slice(0, 19).replace('T', ' '),
-      )
-      .where(
-        'created_at',
-        '<',
-        postgres ? query.to : query.to.slice(0, 19).replace('T', ' '),
-      )
-      .select(
-        db.raw(
-          `${
-            postgres
-              ? "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
-              : 'substr(created_at, 1, 10)'
-          } AS date`,
-        ),
-      )
-      .select(db.raw('COUNT(*) AS total'))
-      .select(
-        db.raw(
-          "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed",
-        ),
-      )
-      .select(
-        db.raw("SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"),
-      )
-      .groupBy('date'));
-    const rollups = (results: typeof templateRows, kind: 'template' | 'user') =>
-      results.slice(0, this.maxHistoryRows)
-        .map(row => {
-          const userName =
-            row.id === 'unknown' ? 'Unknown user' : (row.id as string);
-          return {
-            id: row.id as string,
-            name: kind === 'template' ? (row.name as string) : userName,
-            lastRun: isoDate(row.last_run),
-            ...mapMetrics(row),
-          };
-        })
-        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-    const daily = new Map(dailyRows.map(row => [row.date, row]));
-    const activity: DailyActivity[] = [];
-    for (
-      let day = Date.parse(query.from);
-      day < Date.parse(query.to);
-      day += 86_400_000
-    ) {
-      const date = new Date(day).toISOString().slice(0, 10);
-      const row = daily.get(date);
-      const total = Number(row?.total ?? 0);
-      const completed = Number(row?.completed ?? 0);
-      const failed = Number(row?.failed ?? 0);
-      activity.push({
-        date,
-        total,
-        completed,
-        failed,
-        other: total - completed - failed,
-      });
-    }
-    const summary = mapMetrics(summaryRow);
+    const activity = await readDailyActivity(db, postgres, metadata(cohort), query, run);
     return { snapshotIds, analytics: {
       scope: query.scope,
       items: rows,
       summary,
-      templates: rollups(templateRows, 'template'),
-      users: rollups(userRows, 'user'),
-      rollupsTruncated: {
-        templates: templateRows.length > this.maxHistoryRows,
-        users: userRows.length > this.maxHistoryRows,
-      },
+      templates,
+      users,
+      rollupsTruncated,
       activity,
       page: { offset, limit, total: matchingTotal, hasMore: offset + limit < matchingTotal },
       facets: {
@@ -555,9 +465,7 @@ export class DatabaseHistoryStore {
         scanned: summary.total,
         sourceTotal: query.allTime && !query.templateRef ? summary.total : undefined,
         truncated: false,
-        oldestAt: summaryRow.oldest_at
-          ? isoDate(summaryRow.oldest_at)
-          : undefined,
+        oldestAt,
         generatedAt: new Date().toISOString(),
       },
     } };
