@@ -1,6 +1,6 @@
 {
   "name": "@abayramli/backstage-plugin-template-pulse",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Track Backstage template usage, success rates, and run times, and search past runs.",
   "license": "Apache-2.0",
   "backstage": {
