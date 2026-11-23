@@ -23,11 +23,25 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      pull_request: ${{ steps.release.outputs.pr }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
           target-branch: main
+
+  verify-release-pr:
+    needs: release
+    if: needs.release.outputs.pull_request != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Start required checks on the release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: ${{ fromJSON(needs.release.outputs.pull_request).headBranchName }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" -f "ref=$RELEASE_BRANCH"
 
   publish:
     needs: release
