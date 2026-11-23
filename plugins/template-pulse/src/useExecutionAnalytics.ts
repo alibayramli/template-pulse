@@ -31,7 +31,11 @@ export function useExecutionAnalytics(
   } = selection;
   const [loadingMore, setLoadingMore] = useState(false);
   const requestController = useRef<AbortController>();
-  const resultQuery = useRef<ExecutionQuery>();
+  const resultQuery = useRef<{
+    api: typeof api;
+    query: ExecutionQuery;
+    revision: number;
+  }>();
   const previousRequest = useRef<{
     query: ExecutionQuery;
     revision: number;
@@ -138,7 +142,10 @@ export function useExecutionAnalytics(
     const debounceMs =
       previous?.query.query !== query.query ? 0 : FILTER_DEBOUNCE_MS;
     const executionsOnly = Boolean(
-      filtersChanged && resultQuery.current === analyticsQuery,
+      filtersChanged &&
+        resultQuery.current?.api === api &&
+        resultQuery.current.query === analyticsQuery &&
+        resultQuery.current.revision === revision,
     );
     setUpdatingExecutions(executionsOnly);
     previousRequest.current = { query, revision };
@@ -147,6 +154,21 @@ export function useExecutionAnalytics(
     setShowLoadingIndicator(false);
     setLoadingMore(false);
     if (invalidRange) return () => controller.abort();
+    const { signal } = controller;
+    async function load() {
+      if (executionsOnly && api.getExecutions) {
+        const { items, page } = await api.getExecutions(query, signal);
+        if (!signal.aborted)
+          setResult(current => current && { ...current, items, page });
+        return;
+      }
+      const data = await api.getAnalytics(query, signal);
+      if (signal.aborted) return;
+      resultQuery.current = { api, query: analyticsQuery, revision };
+      setResult(data);
+      setFacets(data.facets);
+    }
+
     let indicatorTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(
       () => {
@@ -155,16 +177,9 @@ export function useExecutionAnalytics(
           () => setShowLoadingIndicator(true),
           LOADING_INDICATOR_DELAY_MS,
         );
-        api
-          .getAnalytics(query, controller.signal)
-          .then(data => {
-            if (controller.signal.aborted) return;
-            resultQuery.current = analyticsQuery;
-            setResult(data);
-            setFacets(data.facets);
-          })
+        load()
           .catch(cause => {
-            if (!controller.signal.aborted) {
+            if (!signal.aborted) {
               // Cohort numbers remain valid when only the detail filters failed.
               if (!executionsOnly) {
                 resultQuery.current = undefined;
@@ -177,7 +192,7 @@ export function useExecutionAnalytics(
           })
           .finally(() => {
             clearTimeout(indicatorTimer);
-            if (!controller.signal.aborted) {
+            if (!signal.aborted) {
               setLoading(false);
               setShowLoadingIndicator(false);
             }

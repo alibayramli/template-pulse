@@ -12,6 +12,8 @@ import type {
 } from '@abayramli/backstage-plugin-template-pulse-common';
 import {
   aggregateExecutions,
+  filterExecutions,
+  paginateExecutions,
   type ExecutionHistory,
   type TeamMembersClient,
 } from '@abayramli/backstage-plugin-template-pulse-node';
@@ -72,6 +74,7 @@ function taskMetadata(task: Task): Execution {
 
 async function projectTask(
   task: Task,
+  execution: Execution,
   credentials: BackstageCredentials,
   callerRef: string,
   { scaffolder, cache, logger }: ServiceHistoryOptions,
@@ -79,7 +82,6 @@ async function projectTask(
   timingBudget: { remainingBytes: number },
 ): Promise<Execution> {
   signal.throwIfAborted();
-  const execution = taskMetadata(task);
 
   if (!['completed', 'failed', 'cancelled'].includes(task.status))
     return execution;
@@ -146,6 +148,64 @@ export class ServiceHistory implements ExecutionHistory {
     maxTasks: number,
     signal = AbortSignal.timeout(30_000),
   ): Promise<ExecutionAnalytics> {
+    const { cohort, metadata, sourceTotal, more, addTimings } =
+      await this.readTasks(query, credentials, maxTasks, signal);
+    const rows = await addTimings(cohort);
+    rows.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const result: ExecutionAnalytics = {
+      scope: query.scope,
+      ...aggregateExecutions(rows, query, maxTasks),
+      facets: {
+        templates: [
+          ...new Map(
+            metadata.map(row => [
+              row.templateRef,
+              { id: row.templateRef, name: row.templateName },
+            ]),
+          ).values(),
+        ].sort((a, b) => a.name.localeCompare(b.name)),
+        users: [
+          ...new Set(
+            metadata
+              .map(row => row.userRef)
+              .filter((ref): ref is string => Boolean(ref)),
+          ),
+        ].sort(),
+      },
+      window: {
+        historySource: 'service',
+        limit: maxTasks,
+        scanned: metadata.length,
+        sourceTotal,
+        truncated: more,
+        oldestAt: metadata.map(row => row.createdAt).sort()[0],
+        generatedAt: new Date().toISOString(),
+      },
+    };
+    signal.throwIfAborted();
+    return result;
+  }
+
+  async searchExecutions(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    maxTasks: number,
+    signal = AbortSignal.timeout(30_000),
+  ) {
+    const { cohort, addTimings } = await this.readTasks(
+      query, credentials, maxTasks, signal,
+    );
+    const rows = await addTimings(filterExecutions(cohort, query));
+    signal.throwIfAborted();
+    return paginateExecutions(rows, query, maxTasks);
+  }
+
+  private async readTasks(
+    query: ExecutionQuery,
+    credentials: BackstageCredentials,
+    maxTasks: number,
+    signal: AbortSignal,
+  ) {
     if (query.allTime || query.offset || query.cursor) {
       throw new InputError(
         'All-history search and result pagination require the database history source.',
@@ -206,8 +266,7 @@ export class ServiceHistory implements ExecutionHistory {
     const to = Date.parse(query.to);
     // Apply cohort filters before reading timings; execution search/status are detail-only.
     // The public Scaffolder service does not support these filters itself.
-    const cohort = [...tasks.values()].filter(task => {
-      const row = taskMetadata(task);
+    const cohort = metadata.filter(row => {
       const date = Date.parse(row.createdAt);
       return (
         date >= from &&
@@ -217,44 +276,14 @@ export class ServiceHistory implements ExecutionHistory {
       );
     });
     const timingBudget = { remainingBytes: 16 * 1024 * 1024 };
-    const rows = await mapLimited(
-      cohort,
-      task =>
-        projectTask(task, credentials, callerRef, this.options, signal, timingBudget),
-      signal,
-    );
-    rows.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    const result: ExecutionAnalytics = {
-      scope,
-      ...aggregateExecutions(rows, query, maxTasks),
-      facets: {
-        templates: [
-          ...new Map(
-            metadata.map(row => [
-              row.templateRef,
-              { id: row.templateRef, name: row.templateName },
-            ]),
-          ).values(),
-        ].sort((a, b) => a.name.localeCompare(b.name)),
-        users: [
-          ...new Set(
-            metadata
-              .map(row => row.userRef)
-              .filter((ref): ref is string => Boolean(ref)),
-          ),
-        ].sort(),
-      },
-      window: {
-        historySource: 'service',
-        limit: maxTasks,
-        scanned: metadata.length,
-        sourceTotal,
-        truncated: more,
-        oldestAt: metadata.map(row => row.createdAt).sort()[0],
-        generatedAt: new Date().toISOString(),
-      },
-    };
-    signal.throwIfAborted();
-    return result;
+    const addTimings = (rows: Execution[]) =>
+      mapLimited(
+        rows,
+        row => projectTask(
+          tasks.get(row.id)!, row, credentials, callerRef, this.options, signal, timingBudget,
+        ),
+        signal,
+      );
+    return { cohort, metadata, sourceTotal, more, addTimings };
   }
 }

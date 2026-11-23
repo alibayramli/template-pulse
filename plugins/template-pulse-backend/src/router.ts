@@ -116,6 +116,20 @@ export function createRouter({ httpAuth, permissions, maxTasks, history }: Optio
     res.json(page);
   });
 
+  router.get('/executions', async (req, res) => {
+    const query = parseExecutionQuery(req.query);
+    const credentials = await httpAuth.credentials(req, { allow: ['user'] });
+    await authorizeExecutionQuery({ query, credentials, permissions });
+    if (query.cursor || query.offset)
+      throw new InputError('Run search starts on the first page.');
+    const search = history.searchExecutions ?? history.search;
+    const { items, page } = await runAnalytics(req, res, signal =>
+      search.call(history, query, credentials, maxTasks, signal),
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ items, page });
+  });
+
   router.get('/analytics', async (req, res) => {
     const query = parseExecutionQuery(req.query);
     const credentials = await httpAuth.credentials(req, { allow: ['user'] });

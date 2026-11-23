@@ -150,14 +150,35 @@ export class DatabaseHistoryStore {
       signal,
       (transaction, run) => this.searchDatabase(transaction, postgres, query, callerRef, decision, limit, run, snapshot),
     );
-    if (result.analytics.page.hasMore) {
-      const id = snapshot?.id ?? (result.snapshotIds
-        ? await this.snapshots.create(result.snapshotIds, binding, callerRef)
-        : undefined);
-      if (id) result.analytics.page.nextCursor = `${id}.${result.analytics.page.offset + limit}`;
-      else result.analytics.page.continuationUnavailable = true;
-    }
+    await this.setNextCursor(
+      result.analytics.page, result.snapshotIds, binding, callerRef, snapshot?.id,
+    );
     return result.analytics;
+  }
+
+  async searchExecutions(
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Pick<ExecutionAnalytics, 'items' | 'page'>> {
+    this.validateAccess(query, decision);
+    if (query.cursor || query.offset)
+      throw new InputError('Run search starts on the first page.');
+    signal?.throwIfAborted();
+    const db = await this.getDatabase();
+    const postgres = this.isPostgres(db);
+    const { items, page, snapshotIds } = await this.workload.run(
+      db, postgres, signal, async (transaction, run) => {
+        const sources = this.executionSources(transaction, postgres, query, callerRef, decision);
+        if (!postgres) await this.guardSqliteRows(transaction, sources.cohort, run);
+        return this.readMatchingPage(transaction, postgres, sources, query, limit, run);
+      },
+    );
+    const binding = snapshotBinding(query, callerRef, decision, limit);
+    await this.setNextCursor(page, snapshotIds, binding, callerRef);
+    return { items, page };
   }
 
   async searchPage(
@@ -270,6 +291,24 @@ export class DatabaseHistoryStore {
     return { base, metadata, templateRef };
   }
 
+  private executionSources(
+    db: Knex,
+    postgres: boolean,
+    query: HistoryQuery,
+    callerRef: string,
+    decision: QueryPermissionResponse,
+  ) {
+    const { base, metadata, templateRef } = this.metadataQueries(db, postgres, query, callerRef, decision);
+    const cohort = base.clone();
+    if (!query.allTime) {
+      cohort
+        .where('t.created_at', '>=', postgres ? query.from : query.from.slice(0, 19).replace('T', ' '))
+        .where('t.created_at', '<', postgres ? query.to : query.to.slice(0, 19).replace('T', ' '));
+    }
+    if (query.templateRef) cohort.whereRaw(`${templateRef} = ?`, [query.templateRef]);
+    return { cohort, cohortMetadata: metadata(cohort), pageMetadata: metadata(base) };
+  }
+
   private facetChoices(db: Knex, source: Knex.QueryBuilder, facet: ExecutionFacet, search = '') {
     const choices = facet === 'template'
       ? db.from(db.from(source.clone().as('authorized')).select(
@@ -368,6 +407,63 @@ export class DatabaseHistoryStore {
     }));
   }
 
+  private async setNextCursor(
+    page: ExecutionAnalytics['page'],
+    snapshotIds: string[] | undefined,
+    binding: string,
+    callerRef: string,
+    snapshotId?: string,
+  ) {
+    if (!page.hasMore) return;
+    const id = snapshotId ?? (
+      snapshotIds && await this.snapshots.create(snapshotIds, binding, callerRef)
+    );
+    if (id) page.nextCursor = `${id}.${page.offset + page.limit}`;
+    else page.continuationUnavailable = true;
+  }
+
+  private async readMatchingPage(
+    db: Knex,
+    postgres: boolean,
+    sources: { cohortMetadata: Knex.QueryBuilder; pageMetadata: Knex.QueryBuilder },
+    query: HistoryQuery,
+    limit: number,
+    run: RunHistoryQuery,
+    snapshot?: { ids: string[]; offset: number },
+  ) {
+    const details = filterExecutionDetails(
+      db.from(sources.cohortMetadata.clone().as('cohort')), query,
+    );
+    const offset = snapshot?.offset ?? query.offset ?? 0;
+    const count = snapshot ? undefined : await run(details.clone().count({ total: '*' }).first());
+    const total = snapshot?.ids.length ?? Number(count?.total ?? 0);
+    const page: ExecutionAnalytics['page'] = {
+      offset, limit, total, hasMore: offset + limit < total,
+    };
+    let snapshotIds: string[] | undefined;
+    let ids: string[] | Knex.QueryBuilder;
+    if (snapshot) {
+      ids = snapshot.ids.slice(offset, offset + limit);
+    } else {
+      // Only elapsed sorting needs completion events for every matching execution.
+      let sortableDetails = details;
+      if (query.sortBy === 'durationMs') {
+        const executions = executionProjection(db, sources.cohortMetadata, postgres);
+        sortableDetails = filterExecutionDetails(db.from(executions.as('cohort')), query);
+      }
+      const orderedIds = orderExecutionDetails(sortableDetails.select('id'), query);
+      if (page.hasMore && total <= MAX_SNAPSHOT_IDS) {
+        const rows: { id: string }[] = await run(orderedIds.limit(MAX_SNAPSHOT_IDS));
+        snapshotIds = rows.map(row => row.id);
+        ids = snapshotIds.slice(offset, offset + limit);
+      } else {
+        ids = orderedIds.limit(limit).offset(offset);
+      }
+    }
+    const items = await this.readPageItems(db, postgres, sources.pageMetadata, ids, query, run);
+    return { items, page, snapshotIds };
+  }
+
   private async searchDatabase(
     db: Knex,
     postgres: boolean,
@@ -378,32 +474,10 @@ export class DatabaseHistoryStore {
     run: RunHistoryQuery,
     snapshot?: { id: string; ids: string[]; offset: number },
   ): Promise<{ analytics: ExecutionAnalytics; snapshotIds?: string[] }> {
-    const { base, metadata, templateRef } = this.metadataQueries(db, postgres, query, callerRef, decision);
-
     // A transaction has one connection; execute its statements sequentially.
-    const cohort = base.clone();
-    if (!query.allTime) {
-      cohort
-        .where(
-          't.created_at',
-          '>=',
-          postgres ? query.from : query.from.slice(0, 19).replace('T', ' '),
-        )
-        .where(
-          't.created_at',
-          '<',
-          postgres ? query.to : query.to.slice(0, 19).replace('T', ' '),
-        );
-    }
-    if (query.templateRef)
-      cohort.whereRaw(`${templateRef} = ?`, [query.templateRef]);
-    const executions = executionProjection(db, metadata(cohort), postgres);
-    const details = filterExecutionDetails(
-      db.from(metadata(cohort).as('cohort')),
-      query,
-    );
+    const sources = this.executionSources(db, postgres, query, callerRef, decision);
     if (!postgres) {
-      await this.guardSqliteRows(db, cohort, run);
+      await this.guardSqliteRows(db, sources.cohort, run);
     }
     const templateSource = this.facetMetadata(db, postgres, query, callerRef, decision, 'template');
     const userSource = this.facetMetadata(db, postgres, query, callerRef, decision, 'user');
@@ -413,37 +487,23 @@ export class DatabaseHistoryStore {
     }
     const templateChoices = await run(this.facetChoices(db, templateSource, 'template'));
     const userChoices = await run(this.facetChoices(db, userSource, 'user'));
-    const offset = snapshot?.offset ?? query.offset ?? 0;
-    // Only elapsed sorting needs completion events for every matching execution.
-    const sortableDetails =
-      query.sortBy === 'durationMs'
-        ? filterExecutionDetails(db.from(executions.clone().as('cohort')), query)
-        : details.clone();
-    const pageIds = orderExecutionDetails(sortableDetails.clone().select('id'), query)
-      .limit(limit)
-      .offset(offset);
+    const executions = executionProjection(db, sources.cohortMetadata, postgres);
     const { summary, templates, users, rollupsTruncated, oldestAt } = await readSummaryAndRollups(
       db, executions, this.maxHistoryRows, run,
     );
-    const matchingCount = await run(details.clone().count({ total: '*' }).first());
-    const matchingTotal = snapshot?.ids.length ?? Number(matchingCount?.total ?? 0);
-    let snapshotIds: string[] | undefined;
-    if (!snapshot && offset + limit < matchingTotal && matchingTotal <= MAX_SNAPSHOT_IDS) {
-      const ids = await run(orderExecutionDetails(sortableDetails.clone().select('id'), query).limit(MAX_SNAPSHOT_IDS));
-      snapshotIds = ids.map((row: { id: string }) => row.id);
-    }
-    const orderedIds = snapshot?.ids.slice(offset, offset + limit) ?? snapshotIds?.slice(offset, offset + limit);
-    const rows = await this.readPageItems(db, postgres, metadata(base), orderedIds ?? pageIds, query, run);
-    const activity = await readDailyActivity(db, postgres, metadata(cohort), query, run);
+    const { items, page, snapshotIds } = await this.readMatchingPage(
+      db, postgres, sources, query, limit, run, snapshot,
+    );
+    const activity = await readDailyActivity(db, postgres, sources.cohortMetadata, query, run);
     return { snapshotIds, analytics: {
       scope: query.scope,
-      items: rows,
+      items,
       summary,
       templates,
       users,
       rollupsTruncated,
       activity,
-      page: { offset, limit, total: matchingTotal, hasMore: offset + limit < matchingTotal },
+      page,
       facets: {
         templates: [
           ...new Map(

@@ -279,7 +279,7 @@ export function AnalyticsDashboard({
                         <span> · {metrics.total} total</span>
                       </>
                     ) : (
-                      <>{metrics.total} runs</>
+                      <>{result.page.total} runs</>
                     )}
                     {showLoadingIndicator && updatingExecutions && (
                       <span className="template-pulse-analytics-search-status">

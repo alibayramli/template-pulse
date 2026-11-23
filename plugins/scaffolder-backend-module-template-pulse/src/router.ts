@@ -23,7 +23,7 @@ export function createRouter(options: {
 }) {
   const { httpAuth, permissions, historyStore } = options;
   const router = Router();
-  const handle = (view: 'analytics' | 'page' | 'facets') => async (req: Request, res: Response) => {
+  const handle = (view: 'analytics' | 'page' | 'executions' | 'facets') => async (req: Request, res: Response) => {
     const facetQuery = view === 'facets' ? parseExecutionFacetQuery(req.query) : undefined;
     const query = facetQuery?.query ?? parseExecutionQuery(req.query);
     const limit = req.query.limit ?? '200';
@@ -58,7 +58,9 @@ export function createRouter(options: {
         : undefined;
       const historyQuery = teamMembers ? { ...query, teamMembers } : query;
       const caller = credentials.principal.userEntityRef;
-      const method = view === 'page' ? 'searchPage' : 'search';
+      let method: 'search' | 'searchPage' | 'searchExecutions' = 'search';
+      if (view === 'page') method = 'searchPage';
+      if (view === 'executions') method = 'searchExecutions';
       const result = facetQuery
         ? await historyStore.searchFacets(historyQuery, caller, decision, facetQuery.facet, facetQuery.search, controller.signal)
         : await historyStore[method](historyQuery, caller, decision, Number(limit), controller.signal);
@@ -73,6 +75,7 @@ export function createRouter(options: {
   };
   router.get('/modules/template-pulse/analytics', handle('analytics'));
   router.get('/modules/template-pulse/analytics/page', handle('page'));
+  router.get('/modules/template-pulse/executions', handle('executions'));
   router.get('/modules/template-pulse/facets', handle('facets'));
   return router;
 }
