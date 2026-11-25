@@ -8,6 +8,7 @@ import {
   NotAllowedError,
   NotFoundError,
   ResponseError,
+  ServiceUnavailableError,
 } from '@backstage/errors';
 import type {
   ExecutionAnalytics,
@@ -18,6 +19,7 @@ import type {
 
 /** Read execution analytics on behalf of the current caller. @public */
 export interface ExecutionHistory {
+  canSearchHistory?(): Promise<boolean>;
   search(
     query: ExecutionQuery,
     credentials: BackstageCredentials,
@@ -47,6 +49,8 @@ export interface ExecutionHistory {
 
 /** Calls the Scaffolder module on behalf of the current user. @public */
 export class HistoryClient implements ExecutionHistory {
+  private availability?: { expiresAt: number; result: Promise<boolean> };
+
   constructor(
     private readonly options: {
       auth: AuthService;
@@ -55,6 +59,34 @@ export class HistoryClient implements ExecutionHistory {
       timeoutMs?: number;
     },
   ) {}
+
+  async canSearchHistory(): Promise<boolean> {
+    const now = Date.now();
+    if (this.availability && this.availability.expiresAt > now)
+      return this.availability.result;
+
+    const result = this.checkAvailability();
+    this.availability = { expiresAt: now + 30_000, result };
+    try {
+      return await result;
+    } catch (error) {
+      if (this.availability?.result === result) this.availability = undefined;
+      throw error;
+    }
+  }
+
+  private async checkAvailability(): Promise<boolean> {
+    const credentials = await this.options.auth.getOwnServiceCredentials();
+    const response = await this.fetchEndpoint(
+      'capabilities',
+      credentials,
+      AbortSignal.timeout(this.options.timeoutMs ?? 3_000),
+    );
+    if (response.status === 204) return true;
+    await response.body?.cancel();
+    if (response.status === 404) return false;
+    throw new ServiceUnavailableError('Could not check Scaffolder database history availability.');
+  }
 
   async search(
     query: ExecutionQuery,
@@ -128,20 +160,12 @@ export class HistoryClient implements ExecutionHistory {
       AbortSignal.timeout(this.options.timeoutMs ?? 30_000),
       ...(signal ? [signal] : []),
     ]);
-    requestSignal.throwIfAborted();
-    const baseUrl = await this.options.discovery.getBaseUrl('scaffolder');
     for (const [key, value] of Object.entries(query))
       if (value !== undefined) params.set(key, String(value));
-    const { token } = await this.options.auth.getPluginRequestToken({
-      onBehalfOf: credentials,
-      targetPluginId: 'scaffolder',
-    });
-    const response = await fetch(
-      `${baseUrl}/modules/template-pulse/${endpoint}?${params}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: requestSignal,
-      },
+    const response = await this.fetchEndpoint(
+      `${endpoint}?${params}`,
+      credentials,
+      requestSignal,
     );
     if (response.status === 404)
       throw new NotFoundError(
@@ -158,5 +182,22 @@ export class HistoryClient implements ExecutionHistory {
       throw error;
     }
     return response.json();
+  }
+
+  private async fetchEndpoint(
+    path: string,
+    credentials: BackstageCredentials,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    signal.throwIfAborted();
+    const baseUrl = await this.options.discovery.getBaseUrl('scaffolder');
+    const { token } = await this.options.auth.getPluginRequestToken({
+      onBehalfOf: credentials,
+      targetPluginId: 'scaffolder',
+    });
+    return fetch(`${baseUrl}/modules/template-pulse/${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
   }
 }
