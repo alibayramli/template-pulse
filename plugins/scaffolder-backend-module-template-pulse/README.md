@@ -12,12 +12,7 @@ Add it alongside your Scaffolder backend:
 backend.add(import('@abayramli/backstage-plugin-scaffolder-backend-module-template-pulse'));
 ```
 
-Enable it in `app-config.yaml`:
-
-```yaml
-templatePulse:
-  historySource: database
-```
+Registering the module enables database history and **All history** when `templatePulse.historySource` is unset.
 
 Follow the [installation guide](https://github.com/alibayramli/template-pulse#add-to-backstage) for the frontend, backend, and permissions. Update all Template Pulse packages together.
 

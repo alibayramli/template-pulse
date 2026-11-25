@@ -30,7 +30,7 @@ Template Pulse in Backstage with sample data.
 
 Requires Backstage's new frontend and backend, React 18, and Node.js 22 or 24. Your app must already have Scaffolder, user sign-in, and a permission backend with a registered policy.
 
-The minimal setup uses your existing Scaffolder API and covers the latest 200 runs.
+Without the optional history module, Template Pulse uses your Scaffolder API and reads the latest 200 runs by default.
 
 From your Backstage app's root, install the packages (adjust `app` and `backend` if your workspaces use other names):
 
@@ -80,7 +80,7 @@ Users granted `template-pulse.read-all` can also select **Organization**. Team f
 
 Search, status, and sorting change only the run list. Use **Copy link** to share your filters. Inputs, secrets, outputs, and raw logs are not shown.
 
-For older runs and searchable filters, add the optional [database history module](plugins/scaffolder-backend-module-template-pulse/README.md). Its guide covers limits and setup for multiple backend servers.
+Register the optional database history module to enable **All history** and searchable filters. The module guide covers limits and setup for multiple backend servers. [Database history module](plugins/scaffolder-backend-module-template-pulse/README.md)
 
 Update all Template Pulse packages together, including the optional history module.
 

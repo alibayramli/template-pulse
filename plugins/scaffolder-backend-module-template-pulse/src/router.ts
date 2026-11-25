@@ -73,6 +73,11 @@ export function createRouter(options: {
       res.removeListener('close', onClose);
     }
   };
+  router.get('/modules/template-pulse/capabilities', async (req, res) => {
+    await httpAuth.credentials(req, { allow: ['service'] });
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(204).end();
+  });
   router.get('/modules/template-pulse/analytics', handle('analytics'));
   router.get('/modules/template-pulse/analytics/page', handle('page'));
   router.get('/modules/template-pulse/executions', handle('executions'));

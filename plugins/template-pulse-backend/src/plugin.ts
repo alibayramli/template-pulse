@@ -53,22 +53,31 @@ export const templatePulsePlugin = createBackendPlugin({
           );
         }
         permissionsRegistry.addPermissions(executionsPermissions);
-        const historySource =
-          config.getOptionalString('templatePulse.historySource') ?? 'service';
-        if (!['database', 'service'].includes(historySource))
+        const historySource = config.getOptionalString('templatePulse.historySource');
+        if (
+          historySource !== undefined &&
+          historySource !== 'database' &&
+          historySource !== 'service'
+        )
           throw new Error(
             'templatePulse.historySource must be database or service.',
           );
-        const history =
-          historySource === 'database'
-            ? new HistoryClient({ auth, discovery })
-            : new ServiceHistory({
-                scaffolder: new ScaffolderTasksClient({ auth, discovery }),
-                teams: new TeamMembersClient({ auth, discovery }),
-                cache,
-                logger,
-              });
-        httpRouter.use(createRouter({ httpAuth, permissions, maxTasks, history }));
+        const serviceHistory = new ServiceHistory({
+          scaffolder: new ScaffolderTasksClient({ auth, discovery }),
+          teams: new TeamMembersClient({ auth, discovery }),
+          cache,
+          logger,
+        });
+        const history = historySource === 'service'
+          ? serviceHistory
+          : new HistoryClient({ auth, discovery });
+        httpRouter.use(createRouter({
+          httpAuth,
+          permissions,
+          maxTasks,
+          history,
+          fallbackHistory: historySource === undefined ? serviceHistory : undefined,
+        }));
       },
     });
   },

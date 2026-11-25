@@ -45,7 +45,7 @@ export const scaffolderModuleTemplatePulse = createBackendModule({
           { cache },
         );
         if (
-          config.getOptionalString('templatePulse.historySource') === 'database'
+          config.getOptionalString('templatePulse.historySource') !== 'service'
         ) {
           // Module init runs before the plugin. Validate only after Scaffolder
           // has initialized and migrated its database, never before its tables exist.

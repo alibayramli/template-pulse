@@ -23,11 +23,18 @@ type Options = {
   permissions: PermissionsService;
   maxTasks: number;
   history: ExecutionHistory;
+  fallbackHistory?: ExecutionHistory;
 };
 
-export function createRouter({ httpAuth, permissions, maxTasks, history }: Options) {
+export function createRouter({ httpAuth, permissions, maxTasks, history, fallbackHistory }: Options) {
   const router = Router();
   let activeAnalyticsRequests = 0;
+
+  async function resolveHistory(): Promise<ExecutionHistory> {
+    if (fallbackHistory && !(await history.canSearchHistory?.()))
+      return fallbackHistory;
+    return history;
+  }
 
   async function runAnalytics<T>(
     req: Request,
@@ -79,24 +86,25 @@ export function createRouter({ httpAuth, permissions, maxTasks, history }: Optio
       ],
       { credentials },
     );
+    const canReadOwn = own?.result === AuthorizeResult.ALLOW;
+    const canReadAll = all?.result === AuthorizeResult.ALLOW;
+    const canSearchHistory =
+      (canReadOwn || canReadAll) &&
+      (await history.canSearchHistory?.().catch(() => false)) === true;
     res.setHeader('Cache-Control', 'no-store');
-    res.json({
-      canSearchHistory: Boolean(history.searchFacets),
-      canReadOwn: own?.result === AuthorizeResult.ALLOW,
-      canReadAll: all?.result === AuthorizeResult.ALLOW,
-    });
+    res.json({ canSearchHistory, canReadOwn, canReadAll });
   });
 
   router.get('/facets', async (req, res) => {
     const { query, facet, search } = parseExecutionFacetQuery(req.query);
     const credentials = await httpAuth.credentials(req, { allow: ['user'] });
     await authorizeExecutionQuery({ query, credentials, permissions });
-    const searchFacets = history.searchFacets?.bind(history);
-    if (!searchFacets)
-      throw new InputError('Filter search requires the database history source.');
-    const result = await runAnalytics(req, res, signal =>
-      searchFacets(query, credentials, facet, search, signal),
-    );
+    const result = await runAnalytics(req, res, async signal => {
+      const source = await resolveHistory();
+      if (!source.searchFacets)
+        throw new InputError('Filter search requires the database history source.');
+      return source.searchFacets(query, credentials, facet, search, signal);
+    });
     res.setHeader('Cache-Control', 'no-store');
     res.json(result);
   });
@@ -106,12 +114,12 @@ export function createRouter({ httpAuth, permissions, maxTasks, history }: Optio
     const credentials = await httpAuth.credentials(req, { allow: ['user'] });
     await authorizeExecutionQuery({ query, credentials, permissions });
     if (!query.cursor) throw new InputError('A history cursor is required.');
-    const searchPage = history.searchPage?.bind(history);
-    if (!searchPage)
-      throw new InputError('Pagination requires the database history source.');
-    const page = await runAnalytics(req, res, signal =>
-      searchPage(query, credentials, maxTasks, signal),
-    );
+    const page = await runAnalytics(req, res, async signal => {
+      const source = await resolveHistory();
+      if (!source.searchPage)
+        throw new InputError('Pagination requires the database history source.');
+      return source.searchPage(query, credentials, maxTasks, signal);
+    });
     res.setHeader('Cache-Control', 'no-store');
     res.json(page);
   });
@@ -122,10 +130,11 @@ export function createRouter({ httpAuth, permissions, maxTasks, history }: Optio
     await authorizeExecutionQuery({ query, credentials, permissions });
     if (query.cursor || query.offset)
       throw new InputError('Run search starts on the first page.');
-    const search = history.searchExecutions ?? history.search;
-    const { items, page } = await runAnalytics(req, res, signal =>
-      search.call(history, query, credentials, maxTasks, signal),
-    );
+    const { items, page } = await runAnalytics(req, res, async signal => {
+      const source = await resolveHistory();
+      const search = source.searchExecutions ?? source.search;
+      return search.call(source, query, credentials, maxTasks, signal);
+    });
     res.setHeader('Cache-Control', 'no-store');
     res.json({ items, page });
   });
@@ -134,9 +143,10 @@ export function createRouter({ httpAuth, permissions, maxTasks, history }: Optio
     const query = parseExecutionQuery(req.query);
     const credentials = await httpAuth.credentials(req, { allow: ['user'] });
     await authorizeExecutionQuery({ query, credentials, permissions });
-    const analytics = await runAnalytics(req, res, signal =>
-      history.search(query, credentials, maxTasks, signal),
-    );
+    const analytics = await runAnalytics(req, res, async signal => {
+      const source = await resolveHistory();
+      return source.search(query, credentials, maxTasks, signal);
+    });
     res.setHeader('Cache-Control', 'no-store');
     res.json(analytics);
   });
