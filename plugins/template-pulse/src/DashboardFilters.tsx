@@ -321,6 +321,11 @@ export function DashboardFilters({
             {scope === 'all' && (
               <EntityFilterSelect
                 label="Team"
+                labelHelp={
+                  team !== 'any'
+                    ? 'Shows runs by people who are currently direct members of this team.'
+                    : undefined
+                }
                 value={team}
                 onChange={value => onChange({ team: value, user: 'any' })}
                 options={[{ id: 'any', label: 'All teams' }, ...teamOptions]}
@@ -340,11 +345,6 @@ export function DashboardFilters({
           {scope === 'all' && teamsError && (
             <Text variant="body-small" color="secondary" role="status">
               Teams could not be loaded. Refresh to try again.
-            </Text>
-          )}
-          {team !== 'any' && (
-            <Text variant="body-small" color="secondary">
-              Runs by current direct members of the selected catalog group.
             </Text>
           )}
         </section>
