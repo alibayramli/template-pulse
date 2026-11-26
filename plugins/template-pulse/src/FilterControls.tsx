@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   Button,
   ButtonIcon,
   Select,
-  SelectItemText,
   Text,
   Tooltip,
   TooltipTrigger,
   type SelectSearch,
 } from '@backstage/ui';
 import { parseEntityRef } from '@backstage/catalog-model';
+import { InfoTooltip } from './InfoTooltip';
 
 export function ClearIcon() {
   return (
@@ -70,6 +70,7 @@ export type EntityFilterSearch = (
 
 export function EntityFilterSelect({
   label,
+  labelHelp,
   value,
   options,
   onChange,
@@ -77,12 +78,14 @@ export function EntityFilterSelect({
   hasMore = false,
 }: {
   label: string;
+  labelHelp?: string;
   value: string;
   options: EntityFilterOption[];
   onChange: (value: string) => void;
   loadOptions?: EntityFilterSearch;
   hasMore?: boolean;
 }) {
+  const labelId = useId();
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -138,12 +141,17 @@ export function EntityFilterSelect({
         ...new Map(
           [
             ...options.filter(item => item.id === 'any' || item.id === value),
-            ...(page?.items ?? (search ? [] : options)),
+            ...(page?.items ?? (search.trim() ? [] : options)),
           ].map(item => [item.id, retainLabel(item)]),
         ).values(),
       ]
     : options;
-  const moreOptions = page?.hasMore ?? hasMore;
+  let optionsHint: string | undefined;
+  if (loadOptions && !loading && !failed) {
+    if (page?.hasMore) optionsHint = 'Refine your search';
+    else if (!search.trim() && hasMore)
+      optionsHint = 'Type to find more options';
+  }
   let searchConfig: SelectSearch<EntityFilterOption> | undefined;
   if (loadOptions) {
     searchConfig = {
@@ -161,21 +169,31 @@ export function EntityFilterSelect({
           .includes(query.toLowerCase()),
     };
   }
-  let statusMessage = 'More matches available. Refine your search.';
-  if (loading) statusMessage = 'Searching…';
-  if (failed) statusMessage = 'Options could not be loaded. ';
-
   const select = (
     <div
       className="template-pulse-analytics-clearable-select"
       data-active={value !== 'any' || undefined}
     >
+      {labelHelp && (
+        <div className="template-pulse-analytics-select-label">
+          <span id={labelId}>{label}</span>
+          <InfoTooltip
+            label={`About ${label.toLowerCase()} filter`}
+            text={labelHelp}
+          />
+        </div>
+      )}
       <Select
-        label={label}
+        label={labelHelp ? undefined : label}
+        aria-labelledby={labelHelp ? labelId : undefined}
         size="small"
         selectionMode="single"
         value={value}
-        items={visibleOptions}
+        options={
+          optionsHint
+            ? [{ title: optionsHint, options: visibleOptions }]
+            : visibleOptions
+        }
         loading={
           loadOptions ? { state: loading ? 'filtering' : 'idle' } : undefined
         }
@@ -186,15 +204,7 @@ export function EntityFilterSelect({
             setSelectedOption(visibleOptions.find(item => item.id === next));
           onChange(next);
         }}
-      >
-        {item => (
-          <SelectItemText
-            id={item.id}
-            title={item.label}
-            description={item.description}
-          />
-        )}
-      </Select>
+      />
       {value !== 'any' && (
         <TooltipTrigger delay={200}>
           <ButtonIcon
@@ -214,10 +224,10 @@ export function EntityFilterSelect({
   return (
     <div>
       {select}
-      {(loading || failed || moreOptions) && (
+      {(loading || failed) && (
         <div role={failed ? 'alert' : 'status'}>
           <Text variant="body-small" color="secondary">
-            {statusMessage}
+            {failed ? 'Options could not be loaded. ' : 'Searching…'}
           </Text>
           {failed && (
             <Button
