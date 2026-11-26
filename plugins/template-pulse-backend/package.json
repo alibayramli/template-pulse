@@ -1,6 +1,6 @@
 {
   "name": "@abayramli/backstage-plugin-template-pulse-backend",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Analytics and searchable history for Scaffolder runs, with access controlled by Backstage permissions.",
   "license": "Apache-2.0",
   "backstage": {
